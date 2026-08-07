@@ -19,6 +19,9 @@ public class Merchant {
 
     private String website;
 
+    @Column(name = "logo_url", length = 1000)
+    private String logoUrl;
+
     private String phone;
 
     private String category;
@@ -81,6 +84,14 @@ public class Merchant {
 
     public void setWebsite(String website) {
         this.website = website;
+    }
+
+    public String getLogoUrl() {
+        return logoUrl;
+    }
+
+    public void setLogoUrl(String logoUrl) {
+        this.logoUrl = logoUrl;
     }
 
     public String getPhone() {

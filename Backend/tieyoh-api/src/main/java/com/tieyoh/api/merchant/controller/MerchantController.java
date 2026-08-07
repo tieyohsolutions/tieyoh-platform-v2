@@ -64,6 +64,7 @@ public ResponseEntity<MerchantResponse> getMerchantDetails(@PathVariable Long id
                 response.setTmid(merchant.getTmid());
                 response.setBrandName(merchant.getBrandName());
                 response.setWebsite(merchant.getWebsite());
+                response.setLogoUrl(merchant.getLogoUrl());
                 response.setPhone(merchant.getPhone());
                 response.setCategory(merchant.getCategory());
 
