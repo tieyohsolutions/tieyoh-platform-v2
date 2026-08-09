@@ -11,6 +11,10 @@ public class Merchant {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_merchant_id")
+    private ParentMerchant parentMerchant;
+
     @Column(name = "tmid", nullable = false, unique = true, length = 50)
     private String tmid;
 
@@ -58,6 +62,13 @@ public class Merchant {
         return id;
     }
 
+    public ParentMerchant getParentMerchant() {
+        return parentMerchant;
+    }
+
+    public void setParentMerchant(ParentMerchant parentMerchant) {
+        this.parentMerchant = parentMerchant;
+    }
     public void setId(Long id) {
         this.id = id;
     }

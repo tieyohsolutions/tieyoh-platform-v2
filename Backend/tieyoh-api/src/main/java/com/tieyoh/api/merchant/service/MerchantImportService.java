@@ -3,6 +3,7 @@ package com.tieyoh.api.merchant.service;
 import com.tieyoh.api.merchant.dto.MerchantImportRecord;
 import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.entity.MerchantLocation;
+import com.tieyoh.api.merchant.entity.ParentMerchant;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -10,17 +11,53 @@ public class MerchantImportService {
 
     private final MerchantService merchantService;
     private final MerchantLocationService merchantLocationService;
+    private final ParentMerchantService parentMerchantService;
 
     public MerchantImportService(
             MerchantService merchantService,
-            MerchantLocationService merchantLocationService) {
+            MerchantLocationService merchantLocationService,
+            ParentMerchantService parentMerchantService) {
+
         this.merchantService = merchantService;
         this.merchantLocationService = merchantLocationService;
+        this.parentMerchantService = parentMerchantService;
     }
 
     public Merchant importMerchant(MerchantImportRecord record) {
 
+        Merchant existingMerchant = merchantService
+            .getMerchantBySource(
+                record.getSource(),
+                record.getSourceMerchantId()
+            )
+            .orElse(null);
+
+        if (existingMerchant != null) {
+            return existingMerchant;
+        }
+
+        // Step 1: Find or create the parent merchant / PMID
+        ParentMerchant parentMerchant =
+                parentMerchantService
+                        .getParentMerchantByBrandName(record.getBrandName())
+                        .orElse(null);
+
+        if (parentMerchant == null) {
+
+            parentMerchant = new ParentMerchant();
+            parentMerchant.setBrandName(record.getBrandName());
+            parentMerchant.setWebsite(record.getWebsite());
+            parentMerchant.setLogoUrl(record.getLogoUrl());
+            parentMerchant.setStatus("ACTIVE");
+
+            parentMerchant =
+                    parentMerchantService.saveParentMerchant(parentMerchant);
+        }
+
+        // Step 2: Create the branch / affiliate merchant and its TMID
         Merchant merchant = new Merchant();
+
+        merchant.setParentMerchant(parentMerchant);
         merchant.setBrandName(record.getBrandName());
         merchant.setWebsite(record.getWebsite());
         merchant.setLogoUrl(record.getLogoUrl());
@@ -30,9 +67,12 @@ public class MerchantImportService {
         merchant.setSourceMerchantId(record.getSourceMerchantId());
         merchant.setStatus("ACTIVE");
 
-        Merchant savedMerchant = merchantService.saveMerchant(merchant);
+        Merchant savedMerchant =
+                merchantService.saveMerchant(merchant);
 
+        // Step 3: Create the physical merchant location
         MerchantLocation location = new MerchantLocation();
+
         location.setMerchant(savedMerchant);
         location.setLocationName(record.getLocationName());
         location.setAddressLine1(record.getAddressLine1());

@@ -1,15 +1,15 @@
 package com.tieyoh.api.merchant.controller;
 
 import com.tieyoh.api.merchant.dto.MerchantLocationResponse;
-import java.util.stream.Collectors;
-import com.tieyoh.api.merchant.service.MerchantLocationService;
 import com.tieyoh.api.merchant.dto.MerchantResponse;
 import com.tieyoh.api.merchant.entity.Merchant;
+import com.tieyoh.api.merchant.service.MerchantLocationService;
 import com.tieyoh.api.merchant.service.MerchantService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/merchants")
@@ -19,11 +19,12 @@ public class MerchantController {
     private final MerchantLocationService merchantLocationService;
 
     public MerchantController(
-        MerchantService merchantService,
-        MerchantLocationService merchantLocationService) {
-    this.merchantService = merchantService;
-    this.merchantLocationService = merchantLocationService;
-}
+            MerchantService merchantService,
+            MerchantLocationService merchantLocationService) {
+
+        this.merchantService = merchantService;
+        this.merchantLocationService = merchantLocationService;
+    }
 
     @GetMapping
     public List<Merchant> getAllMerchants() {
@@ -38,62 +39,94 @@ public class MerchantController {
     }
 
     @GetMapping("/tmid/{tmid}")
-    public ResponseEntity<Merchant> getMerchantByTmid(@PathVariable String tmid) {
+    public ResponseEntity<Merchant> getMerchantByTmid(
+            @PathVariable String tmid) {
+
         return merchantService.getMerchantByTmid(tmid)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
-    public ResponseEntity<Merchant> createMerchant(@RequestBody Merchant merchant) {
+    public ResponseEntity<Merchant> createMerchant(
+            @RequestBody Merchant merchant) {
 
-        
-        Merchant savedMerchant = merchantService.saveMerchant(merchant);
+        Merchant savedMerchant =
+                merchantService.saveMerchant(merchant);
 
         return ResponseEntity.ok(savedMerchant);
     }
+
     @GetMapping("/{id}/details")
-public ResponseEntity<MerchantResponse> getMerchantDetails(@PathVariable Long id) {
+    public ResponseEntity<MerchantResponse> getMerchantDetails(
+            @PathVariable Long id) {
 
-    return merchantService.getMerchantById(id)
-            .map(merchant -> {
+        return merchantService.getMerchantById(id)
+                .map(merchant -> {
 
-                MerchantResponse response = new MerchantResponse();
+                    MerchantResponse response =
+                            new MerchantResponse();
 
-                response.setId(merchant.getId());
-                response.setTmid(merchant.getTmid());
-                response.setBrandName(merchant.getBrandName());
-                response.setWebsite(merchant.getWebsite());
-                response.setLogoUrl(merchant.getLogoUrl());
-                response.setPhone(merchant.getPhone());
-                response.setCategory(merchant.getCategory());
+                    response.setId(merchant.getId());
+                    response.setTmid(merchant.getTmid());
+                    response.setBrandName(merchant.getBrandName());
+                    response.setWebsite(merchant.getWebsite());
+                    response.setLogoUrl(merchant.getLogoUrl());
+                    response.setPhone(merchant.getPhone());
+                    response.setCategory(merchant.getCategory());
+                    response.setStatus(merchant.getStatus());
 
-                response.setStatus(merchant.getStatus());
-                response.setLocations(
-        merchantLocationService.getLocationsByMerchant(merchant.getId())
-                .stream()
-                .map(location -> {
-                    MerchantLocationResponse locationResponse =
-                            new MerchantLocationResponse();
+                    response.setLocations(
+                            merchantLocationService
+                                    .getLocationsByMerchant(merchant.getId())
+                                    .stream()
+                                    .map(location -> {
 
-                    locationResponse.setId(location.getId());
-                    locationResponse.setLocationName(location.getLocationName());
-                    locationResponse.setAddressLine1(location.getAddressLine1());
-                    locationResponse.setAddressLine2(location.getAddressLine2());
-                    locationResponse.setCity(location.getCity());
-                    locationResponse.setState(location.getState());
-                    locationResponse.setPostalCode(location.getPostalCode());
-                    locationResponse.setCountry(location.getCountry());
-                    locationResponse.setPhone(location.getPhone());
+                                        MerchantLocationResponse locationResponse =
+                                                new MerchantLocationResponse();
 
-                    return locationResponse;
+                                        locationResponse.setId(location.getId());
+                                        locationResponse.setLocationName(
+                                                location.getLocationName()
+                                        );
+                                        locationResponse.setAddressLine1(
+                                                location.getAddressLine1()
+                                        );
+                                        locationResponse.setAddressLine2(
+                                                location.getAddressLine2()
+                                        );
+                                        locationResponse.setCity(
+                                                location.getCity()
+                                        );
+                                        locationResponse.setState(
+                                                location.getState()
+                                        );
+                                        locationResponse.setPostalCode(
+                                                location.getPostalCode()
+                                        );
+                                        locationResponse.setCountry(
+                                                location.getCountry()
+                                        );
+                                        locationResponse.setPhone(
+                                                location.getPhone()
+                                        );
+
+                                        return locationResponse;
+                                    })
+                                    .collect(Collectors.toList())
+                    );
+
+                    return ResponseEntity.ok(response);
                 })
-                .collect(Collectors.toList())
-            
-                );
+                .orElse(ResponseEntity.notFound().build());
+    }
 
-                return ResponseEntity.ok(response);
-            })
-            .orElse(ResponseEntity.notFound().build());
-}
+    @PatchMapping("/{id}/deactivate")
+    public ResponseEntity<Merchant> deactivateMerchant(
+            @PathVariable Long id) {
+
+        return merchantService.deactivateMerchant(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
 }

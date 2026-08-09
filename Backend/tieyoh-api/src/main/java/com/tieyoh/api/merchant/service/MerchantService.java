@@ -28,18 +28,45 @@ public class MerchantService {
         return merchantRepository.findByTmid(tmid);
     }
 
-    public Merchant saveMerchant(Merchant merchant) {
+    public Optional<Merchant> getMerchantBySource(
+            String source,
+            String sourceMerchantId) {
 
-    if (merchant.getTmid() == null || merchant.getTmid().isBlank()) {
-        long nextNumber = merchantRepository.count() + 1;
-        String generatedTmid = String.format("t%06d", nextNumber);
-        merchant.setTmid(generatedTmid);
+        return merchantRepository.findBySourceAndSourceMerchantId(
+                source,
+                sourceMerchantId);
     }
 
-    return merchantRepository.save(merchant);
-}
+    public Merchant saveMerchant(Merchant merchant) {
+
+        if (merchant.getTmid() == null || merchant.getTmid().isBlank()) {
+            Long nextNumber = merchantRepository.getNextTmidSequence();
+            String generatedTmid = String.format("t%012d", nextNumber);
+            merchant.setTmid(generatedTmid);
+        }
+
+        return merchantRepository.save(merchant);
+    }
 
     public boolean tmidExists(String tmid) {
         return merchantRepository.existsByTmid(tmid);
+    }
+
+    public Optional<Merchant> deactivateMerchant(Long id) {
+
+        Optional<Merchant> merchantOptional =
+                merchantRepository.findById(id);
+
+        if (merchantOptional.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Merchant merchant = merchantOptional.get();
+        merchant.setStatus("INACTIVE");
+
+        return Optional.of(
+                merchantRepository.save(merchant)
+        
+            );
     }
 }

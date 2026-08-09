@@ -8,6 +8,7 @@ public class MerchantResponse {
     private String tmid;
     private String brandName;
     private String website;
+    private String logoUrl;
     private String phone;
     private String category;
     private String status;
@@ -41,6 +42,13 @@ public class MerchantResponse {
         return website;
     }
 
+     public String getLogoUrl() {
+        return logoUrl;
+    }
+
+    public void setLogoUrl(String logoUrl) {
+        this.logoUrl = logoUrl;
+    }
     public void setWebsite(String website) {
         this.website = website;
     }
