@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Log In')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<section class="container py-5" style="max-width: 480px;">
+    <h1 class="fw-bold mb-4">Member Log In</h1>
+
+    <div class="alert alert-danger" th:if="${param.error}">
+        Incorrect email or password, or your account is not yet active.
+    </div>
+    <div class="alert alert-success" th:if="${param.logout}">
+        You've been logged out.
+    </div>
+
+    <form th:action="@{/auth/login}" method="post">
+        <div class="mb-3">
+            <label class="form-label" for="username">Email</label>
+            <input class="form-control" type="email" id="username" name="username" required autofocus>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control" type="password" id="password" name="password" required>
+        </div>
+        <button class="btn btn-info w-100" type="submit">Log In</button>
+    </form>
+
+    <p class="text-center mt-4 small text-muted">
+        Don't have an account? <a th:href="@{/auth/signup}">Request access</a>
+    </p>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

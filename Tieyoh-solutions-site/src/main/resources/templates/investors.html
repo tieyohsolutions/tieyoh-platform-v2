@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Investors')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-dark text-white py-5">
+    <div class="container">
+        <h1 class="fw-bold">Investors</h1>
+        <p class="lead col-lg-9 text-light">Tieyoh Solutions is modernizing a $500B+ market. Approved members can access our full data room &mdash; pitch materials, financials, product roadmap, and architecture.</p>
+        <a th:href="@{/auth/signup}" class="btn btn-info btn-lg mt-2">Request data room access</a>
+    </div>
+</header>
+
+<section class="container py-5">
+    <h2 class="h4 fw-bold mb-4">U.S. Gift Card Market Opportunity</h2>
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead class="table-dark">
+            <tr>
+                <th scope="col">Market Metric</th>
+                <th scope="col">2025</th>
+                <th scope="col">2026</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr><td>U.S. Gift Card Market Size</td><td>$447B</td><td>$507B</td></tr>
+            <tr><td>Annual Market Growth</td><td>11%</td><td>11%</td></tr>
+            <tr><td>Estimated Gift Cards Sold</td><td>~4.0 Billion</td><td>~4.5 Billion</td></tr>
+            <tr><td>Average Initial Gift Card Value</td><td>~$50</td><td>~$50</td></tr>
+            <tr><td>Americans with Unused Gift Cards</td><td>43%</td><td>43%</td></tr>
+            <tr><td>Unused Gift Card Value</td><td>~$23B annually</td><td>~$23B annually</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted small">Sources: Precedence Research, Capital One Shopping Research, Digimarc Market Analysis.</p>
+</section>
+
+<section class="bg-light py-5">
+    <div class="container">
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <h2 class="h4 fw-bold">Target Consumer Segments</h2>
+                <ul>
+                    <li class="mb-2"><strong>Ages 16&ndash;25</strong> &mdash; digital-first consumers highly engaged with mobile wallets, peer-to-peer payments, and social experiences.</li>
+                    <li><strong>Ages 30&ndash;50</strong> &mdash; higher purchasing power, regularly buying gifts for family, friends, teachers, and coworkers.</li>
+                </ul>
+            </div>
+            <div class="col-lg-6">
+                <h2 class="h4 fw-bold">Target Merchant Segments</h2>
+                <p>Initial focus on small and mid-sized businesses &mdash; restaurants, coffee shops, specialty retailers, entertainment venues, salons, and local service providers &mdash; that lack affordable digital gifting solutions today.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="container py-5">
+    <h2 class="h4 fw-bold mb-3">How It Works</h2>
+    <p class="text-muted col-lg-9">Tieyoh's four-part model connects a funds sender, the merchant registry, a central funds ledger, and the funds recipient &mdash; supporting redemption through traditional card-network rails or Tieyoh's closed-loop QR experience at participating merchants. Detailed architecture diagrams, functional requirements, and the full technology roadmap are available in the member data room.</p>
+    <a th:href="@{/auth/login}" class="btn btn-outline-dark">Member login</a>
+    <a th:href="@{/auth/signup}" class="btn btn-info ms-2">Request access</a>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

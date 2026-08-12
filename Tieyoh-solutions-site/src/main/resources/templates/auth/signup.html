@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Request Access')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<section class="container py-5" style="max-width: 560px;">
+    <h1 class="fw-bold mb-2">Request Member Access</h1>
+    <p class="text-muted mb-4">Accounts are reviewed by our team before you get access to the data room. You'll be notified once you're approved.</p>
+
+    <div class="alert alert-danger" th:if="${signupError}" th:text="${signupError}">Error</div>
+
+    <form th:action="@{/auth/signup}" th:object="${signupForm}" method="post">
+        <div class="mb-3">
+            <label class="form-label" for="name">Full name</label>
+            <input class="form-control" type="text" id="name" th:field="*{name}" required>
+            <div class="text-danger small" th:if="${#fields.hasErrors('name')}" th:errors="*{name}"></div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control" type="email" id="email" th:field="*{email}" required>
+            <div class="text-danger small" th:if="${#fields.hasErrors('email')}" th:errors="*{email}"></div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="form-label" for="company">Company / Fund</label>
+                <input class="form-control" type="text" id="company" th:field="*{company}">
+            </div>
+            <div class="col-md-6 mb-3">
+                <label class="form-label" for="title">Title</label>
+                <input class="form-control" type="text" id="title" th:field="*{title}">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control" type="password" id="password" th:field="*{password}" required>
+            <div class="text-danger small" th:if="${#fields.hasErrors('password')}" th:errors="*{password}"></div>
+            <div class="form-text">At least 8 characters.</div>
+        </div>
+        <button class="btn btn-info w-100" type="submit">Submit Request</button>
+    </form>
+
+    <p class="text-center mt-4 small text-muted">
+        Already have an account? <a th:href="@{/auth/login}">Log in</a>
+    </p>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

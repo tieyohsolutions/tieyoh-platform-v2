@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Admin - Events')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-dark text-white py-4">
+    <div class="container">
+        <h1 class="fw-bold h3 mb-0">Admin &middot; Events</h1>
+    </div>
+</header>
+
+<section class="container py-5">
+    <h2 class="h5 fw-bold">Create an Event</h2>
+    <form th:action="@{/admin/events}" method="post" class="row g-3 mb-5">
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="title" placeholder="Title" required>
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="datetime-local" name="eventDate" required>
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="location" placeholder="Location or link">
+        </div>
+        <div class="col-md-6">
+            <select class="form-select" name="visibility" required>
+                <option value="PUBLIC">Public</option>
+                <option value="MEMBER_ONLY">Members Only</option>
+            </select>
+        </div>
+        <div class="col-12">
+            <textarea class="form-control" name="description" placeholder="Description" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+            <button class="btn btn-info" type="submit">Create Event</button>
+        </div>
+    </form>
+
+    <h2 class="h5 fw-bold">All Events</h2>
+    <div th:if="${#lists.isEmpty(events)}" class="text-muted">No events yet.</div>
+    <div class="table-responsive" th:unless="${#lists.isEmpty(events)}">
+        <table class="table align-middle">
+            <thead><tr><th>Title</th><th>Date</th><th>Visibility</th><th></th></tr></thead>
+            <tbody>
+            <tr th:each="event : ${events}">
+                <td th:text="${event.title}">Title</td>
+                <td th:text="${#temporals.format(event.eventDate, 'MMM d, yyyy - h:mm a')}">Date</td>
+                <td th:text="${event.visibility}">Visibility</td>
+                <td class="text-end">
+                    <form th:action="@{'/admin/events/' + ${event.id} + '/delete'}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

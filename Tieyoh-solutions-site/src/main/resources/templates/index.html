@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Home')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="text-white py-5" style="background: linear-gradient(120deg,#0d1b2a,#0f6674);">
+    <div class="container py-5">
+        <div class="row align-items-center g-5">
+            <div class="col-lg-6">
+                <h1 class="display-5 fw-bold">Gifting, reimagined for the way people connect with the businesses they love.</h1>
+                <p class="lead mt-3">Tieyoh is a merchant-centric digital gifting platform that unifies consumers, merchants, and payments into a single wallet experience.</p>
+                <div class="mt-4">
+                    <a th:href="@{/investors}" class="btn btn-info btn-lg me-2">For Investors</a>
+                    <a th:href="@{/about}" class="btn btn-outline-light btn-lg">Learn More</a>
+                </div>
+            </div>
+            <div class="col-lg-6 text-center">
+                <div class="bg-white rounded-4 shadow p-4 d-inline-block">
+                    <img th:src="@{/images/tieyoh-logo-full.jpg}" alt="Tieyoh" style="height: 220px; max-width: 100%;" class="rounded">
+                </div>
+                <p class="fst-italic text-info fw-semibold mt-3 mb-0" style="letter-spacing: 0.03em;">"Breaking Boundaries. Refining Gifting."</p>
+            </div>
+        </div>
+    </div>
+</header>
+
+<section class="container py-5">
+    <div class="row g-4 text-center">
+        <div class="col-md-4">
+            <h3 class="h5">One Wallet</h3>
+            <p class="text-muted">Every gift, from every sender, consolidated into a single digital wallet instead of a drawer full of disconnected gift cards.</p>
+        </div>
+        <div class="col-md-4">
+            <h3 class="h5">Merchant Accessible</h3>
+            <p class="text-muted">Merchants of any size can participate without months of commercial negotiation or complex payment integrations.</p>
+        </div>
+        <div class="col-md-4">
+            <h3 class="h5">Built for Connection</h3>
+            <p class="text-muted">Optional, privacy-controlled social features turn gifting into a shared, meaningful experience.</p>
+        </div>
+    </div>
+</section>
+
+<section class="bg-light py-5">
+    <div class="container">
+        <div class="row align-items-center g-4">
+            <div class="col-lg-6">
+                <h2 class="fw-bold">A $500B+ market, ready to be modernized</h2>
+                <p class="text-muted">The U.S. gift card market exceeds $500 billion annually, yet remains fragmented across thousands of disconnected merchant programs. Tieyoh unifies it.</p>
+                <a th:href="@{/investors}" class="btn btn-dark">See the opportunity</a>
+            </div>
+            <div class="col-lg-6">
+                <div class="row g-3 text-center">
+                    <div class="col-6">
+                        <div class="p-3 bg-white rounded shadow-sm card-stat">
+                            <div class="h3 fw-bold text-info mb-0">$507B</div>
+                            <div class="small text-muted">2026 U.S. gift card market</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 bg-white rounded shadow-sm card-stat">
+                            <div class="h3 fw-bold text-info mb-0">11%</div>
+                            <div class="small text-muted">Annual market growth</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 bg-white rounded shadow-sm card-stat">
+                            <div class="h3 fw-bold text-info mb-0">~4.5B</div>
+                            <div class="small text-muted">Gift cards sold in 2026</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 bg-white rounded shadow-sm card-stat">
+                            <div class="h3 fw-bold text-info mb-0">$23B</div>
+                            <div class="small text-muted">Unused gift card value annually</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="container py-5 text-center">
+    <h2 class="fw-bold mb-3">Already working with us, or want to?</h2>
+    <p class="text-muted col-lg-8 mx-auto">Approved members get access to our data room: pitch materials, financials, product roadmap, and more.</p>
+    <a th:href="@{/auth/signup}" class="btn btn-info btn-lg">Request member access</a>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

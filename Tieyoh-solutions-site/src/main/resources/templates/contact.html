@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Contact')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-light py-5">
+    <div class="container">
+        <h1 class="fw-bold">Contact Us</h1>
+        <p class="lead text-muted">Questions about Tieyoh, partnership opportunities, or investing? We'd love to hear from you.</p>
+    </div>
+</header>
+
+<section class="container py-5">
+    <div class="row g-5">
+        <div class="col-lg-6">
+            <h2 class="h5 fw-bold">Get in touch</h2>
+            <p class="text-muted">Email us directly and we'll respond as soon as we can.</p>
+            <a class="btn btn-info" href="mailto:invest@tieyoh.com">invest@tieyoh.com</a>
+            <p class="text-muted small mt-4">
+                A submittable contact form isn't wired up yet &mdash; it needs an outbound email service
+                (e.g. SendGrid or Azure Communication Services) connected on the backend. This scaffold ships
+                with the mailto link above as a placeholder until that's added.
+            </p>
+        </div>
+        <div class="col-lg-6">
+            <h2 class="h5 fw-bold">Already a member?</h2>
+            <p class="text-muted">Log in to reach us through your account, or browse the data room for existing answers.</p>
+            <a th:href="@{/auth/login}" class="btn btn-outline-dark">Member login</a>
+        </div>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

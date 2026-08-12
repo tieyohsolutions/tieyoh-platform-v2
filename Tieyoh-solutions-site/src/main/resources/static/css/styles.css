@@ -1,0 +1,22 @@
+body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.navbar-brand span.text-info {
+    color: #17c3b2 !important;
+}
+
+.card-stat {
+    border: none;
+    border-radius: 0.75rem;
+}
+
+.table-responsive {
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 576px) {
+    .display-5 {
+        font-size: 1.75rem;
+    }
+}

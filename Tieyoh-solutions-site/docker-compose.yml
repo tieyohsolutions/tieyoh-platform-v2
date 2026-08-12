@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: tieyoh-solutions-db
+    environment:
+      POSTGRES_DB: tieyoh_solutions
+      POSTGRES_USER: tieyoh
+      POSTGRES_PASSWORD: tieyoh
+    ports:
+      - "5433:5432"
+    volumes:
+      - tieyoh_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tieyoh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: tieyoh-solutions-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tieyoh_solutions
+      SPRING_DATASOURCE_USERNAME: tieyoh
+      SPRING_DATASOURCE_PASSWORD: tieyoh
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tieyoh.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      ADMIN_NAME: ${ADMIN_NAME:-Tieyoh Admin}
+    ports:
+      - "8080:8080"
+    volumes:
+      - tieyoh_uploads:/app/uploads
+
+volumes:
+  tieyoh_db_data:
+  tieyoh_uploads:

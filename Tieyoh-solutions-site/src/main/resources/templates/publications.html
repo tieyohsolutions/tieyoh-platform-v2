@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Publications')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-light py-5">
+    <div class="container d-flex align-items-center gap-3">
+        <img th:src="@{/images/tieyoh-logo-full.jpg}" alt="Tieyoh" style="height: 64px;" class="rounded d-none d-sm-block">
+        <div>
+            <h1 class="fw-bold mb-1">Publications</h1>
+            <p class="lead text-muted mb-0">News, insights, and updates from Tieyoh. Members get access to additional publications in the data room.</p>
+        </div>
+    </div>
+</header>
+
+<section class="container py-5">
+    <div th:if="${#lists.isEmpty(publications)}" class="text-muted">
+        No public publications yet. Check back soon, or
+        <a th:href="@{/auth/signup}">request member access</a> for the full archive.
+    </div>
+    <div class="row g-4">
+        <div class="col-md-6" th:each="pub : ${publications}">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <h2 class="h5 fw-bold" th:text="${pub.title}">Publication title</h2>
+                    <p class="text-muted small mb-2" th:text="${#temporals.format(pub.publishedAt, 'MMMM d, yyyy')}">Date</p>
+                    <p th:text="${pub.summary}">Summary</p>
+                    <a th:if="${pub.externalUrl}" th:href="${pub.externalUrl}" target="_blank" rel="noopener" class="small">Read more &rarr;</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

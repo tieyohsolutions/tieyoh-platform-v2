@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Admin - Documents')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-dark text-white py-4">
+    <div class="container">
+        <h1 class="fw-bold h3 mb-0">Admin &middot; Documents</h1>
+    </div>
+</header>
+
+<section class="container py-5">
+    <h2 class="h5 fw-bold">Add a Document</h2>
+    <form th:action="@{/admin/documents}" method="post" enctype="multipart/form-data" class="row g-3 mb-5">
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="title" placeholder="Title" required>
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="category" placeholder="Category (e.g. Pitch Deck, Financials)">
+        </div>
+        <div class="col-12">
+            <textarea class="form-control" name="description" placeholder="Description" rows="2"></textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small">Upload a file</label>
+            <input class="form-control" type="file" name="file">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small">Or link an external URL</label>
+            <input class="form-control" type="url" name="externalUrl" placeholder="https://...">
+        </div>
+        <div class="col-12">
+            <button class="btn btn-info" type="submit">Add Document</button>
+        </div>
+    </form>
+
+    <h2 class="h5 fw-bold">All Documents</h2>
+    <div th:if="${#lists.isEmpty(documents)}" class="text-muted">No documents yet.</div>
+    <div class="table-responsive" th:unless="${#lists.isEmpty(documents)}">
+        <table class="table align-middle">
+            <thead><tr><th>Title</th><th>Category</th><th>Added</th><th></th></tr></thead>
+            <tbody>
+            <tr th:each="doc : ${documents}">
+                <td th:text="${doc.title}">Title</td>
+                <td th:text="${doc.category}">Category</td>
+                <td th:text="${#temporals.format(doc.createdAt, 'MMM d, yyyy')}">Date</td>
+                <td class="text-end">
+                    <form th:action="@{'/admin/documents/' + ${doc.id} + '/delete'}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Admin - Publications')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-dark text-white py-4">
+    <div class="container">
+        <h1 class="fw-bold h3 mb-0">Admin &middot; Publications</h1>
+    </div>
+</header>
+
+<section class="container py-5">
+    <h2 class="h5 fw-bold">Add a Publication</h2>
+    <form th:action="@{/admin/publications}" method="post" class="row g-3 mb-5">
+        <div class="col-md-8">
+            <input class="form-control" type="text" name="title" placeholder="Title" required>
+        </div>
+        <div class="col-md-4">
+            <select class="form-select" name="visibility" required>
+                <option value="PUBLIC">Public</option>
+                <option value="MEMBER_ONLY">Members Only</option>
+            </select>
+        </div>
+        <div class="col-12">
+            <textarea class="form-control" name="summary" placeholder="Short summary" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+            <textarea class="form-control" name="content" placeholder="Full content (optional)" rows="4"></textarea>
+        </div>
+        <div class="col-12">
+            <input class="form-control" type="url" name="externalUrl" placeholder="External URL (optional)">
+        </div>
+        <div class="col-12">
+            <button class="btn btn-info" type="submit">Publish</button>
+        </div>
+    </form>
+
+    <h2 class="h5 fw-bold">All Publications</h2>
+    <div th:if="${#lists.isEmpty(publications)}" class="text-muted">No publications yet.</div>
+    <div class="table-responsive" th:unless="${#lists.isEmpty(publications)}">
+        <table class="table align-middle">
+            <thead><tr><th>Title</th><th>Published</th><th>Visibility</th><th></th></tr></thead>
+            <tbody>
+            <tr th:each="pub : ${publications}">
+                <td th:text="${pub.title}">Title</td>
+                <td th:text="${#temporals.format(pub.publishedAt, 'MMM d, yyyy')}">Date</td>
+                <td th:text="${pub.visibility}">Visibility</td>
+                <td class="text-end">
+                    <form th:action="@{'/admin/publications/' + ${pub.id} + '/delete'}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

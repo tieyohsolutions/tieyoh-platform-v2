@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Documents')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-light py-4">
+    <div class="container d-flex align-items-center gap-3">
+        <img th:src="@{/images/tieyoh-logo-full.jpg}" alt="Tieyoh" style="height: 48px;" class="rounded d-none d-sm-block">
+        <div>
+            <h1 class="fw-bold h3 mb-1">Data Room Documents</h1>
+            <p class="text-muted mb-0">Confidential materials for approved members. Please do not redistribute.</p>
+        </div>
+    </div>
+</header>
+
+<section class="container py-5">
+    <div th:if="${#lists.isEmpty(documents)}" class="text-muted">No documents have been added yet.</div>
+    <div class="table-responsive" th:unless="${#lists.isEmpty(documents)}">
+        <table class="table align-middle">
+            <thead>
+            <tr>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Added</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="doc : ${documents}">
+                <td>
+                    <div class="fw-semibold" th:text="${doc.title}">Title</div>
+                    <div class="text-muted small" th:text="${doc.description}">Description</div>
+                </td>
+                <td th:text="${doc.category}">Category</td>
+                <td th:text="${#temporals.format(doc.createdAt, 'MMM d, yyyy')}">Date</td>
+                <td class="text-end">
+                    <a th:if="${doc.filePath}" th:href="@{'/member/documents/' + ${doc.id} + '/download'}" class="btn btn-sm btn-info">Download</a>
+                    <a th:if="${doc.externalUrl}" th:href="${doc.externalUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-dark">Open link</a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Admin - Members')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-dark text-white py-4">
+    <div class="container">
+        <h1 class="fw-bold h3 mb-0">Admin &middot; Members</h1>
+    </div>
+</header>
+
+<section class="container py-5">
+
+    <div class="alert alert-success" th:if="${tempPassword}">
+        Invited <strong th:text="${invitedEmail}">email</strong>. Share this temporary password with them securely
+        (it will not be shown again): <code th:text="${tempPassword}">temp-password</code>
+    </div>
+
+    <h2 class="h5 fw-bold">Pending Approvals</h2>
+    <div th:if="${#lists.isEmpty(pending)}" class="text-muted mb-4">No pending requests.</div>
+    <div class="table-responsive mb-5" th:unless="${#lists.isEmpty(pending)}">
+        <table class="table align-middle">
+            <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Requested</th><th></th></tr></thead>
+            <tbody>
+            <tr th:each="u : ${pending}">
+                <td th:text="${u.name}">Name</td>
+                <td th:text="${u.email}">Email</td>
+                <td th:text="${u.company}">Company</td>
+                <td th:text="${#temporals.format(u.createdAt, 'MMM d, yyyy')}">Date</td>
+                <td class="text-end">
+                    <form th:action="@{'/admin/members/' + ${u.id} + '/approve'}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-success" type="submit">Approve</button>
+                    </form>
+                    <form th:action="@{'/admin/members/' + ${u.id} + '/reject'}" method="post" class="d-inline">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h2 class="h5 fw-bold">Invite a Member Directly</h2>
+    <form th:action="@{/admin/members/invite}" method="post" class="row g-3 mb-5">
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="name" placeholder="Full name" required>
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="email" name="email" placeholder="Email" required>
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="company" placeholder="Company (optional)">
+        </div>
+        <div class="col-md-6">
+            <input class="form-control" type="text" name="title" placeholder="Title (optional)">
+        </div>
+        <div class="col-12">
+            <button class="btn btn-info" type="submit">Invite (creates active account)</button>
+        </div>
+    </form>
+
+    <h2 class="h5 fw-bold">All Members</h2>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            <tr th:each="u : ${allUsers}">
+                <td th:text="${u.name}">Name</td>
+                <td th:text="${u.email}">Email</td>
+                <td th:text="${u.role}">Role</td>
+                <td th:text="${u.status}">Status</td>
+                <td class="text-end">
+                    <form th:action="@{'/admin/members/' + ${u.id} + '/disable'}" method="post" class="d-inline"
+                          th:if="${u.status.name() != 'DISABLED'}">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit">Disable</button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>
