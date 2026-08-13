@@ -7,27 +7,36 @@
 <header class="bg-light py-5">
     <div class="container">
         <h1 class="fw-bold">Contact Us</h1>
-        <p class="lead text-muted">Questions about Tieyoh, partnership opportunities, or investing? We'd love to hear from you.</p>
+        <p class="lead text-muted">Have a question, ran into an issue, or want to talk press or partnerships? Reach out below.</p>
     </div>
 </header>
 
 <section class="container py-5">
-    <div class="row g-5">
-        <div class="col-lg-6">
-            <h2 class="h5 fw-bold">Get in touch</h2>
-            <p class="text-muted">Email us directly and we'll respond as soon as we can.</p>
-            <a class="btn btn-info" href="mailto:invest@tieyoh.com">invest@tieyoh.com</a>
-            <p class="text-muted small mt-4">
-                A submittable contact form isn't wired up yet &mdash; it needs an outbound email service
-                (e.g. SendGrid or Azure Communication Services) connected on the backend. This scaffold ships
-                with the mailto link above as a placeholder until that's added.
-            </p>
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="border rounded-4 p-4 h-100">
+                <h2 class="h5 fw-bold">Questions &amp; Troubleshooting</h2>
+                <p class="text-muted">General questions, account help, or something not working as expected.</p>
+                <a class="fw-bold text-decoration-none text-info fs-5" href="mailto:Contact@tieyoh.com">Contact@tieyoh.com</a>
+            </div>
         </div>
-        <div class="col-lg-6">
-            <h2 class="h5 fw-bold">Already a member?</h2>
-            <p class="text-muted">Log in to reach us through your account, or browse the data room for existing answers.</p>
-            <a th:href="@{/auth/login}" class="btn btn-outline-dark">Member login</a>
+        <div class="col-md-6">
+            <div class="border rounded-4 p-4 h-100">
+                <h2 class="h5 fw-bold">Press &amp; Special Inquiries</h2>
+                <p class="text-muted">Media requests, press releases, partnerships, and investor-related inquiries.</p>
+                <a class="fw-bold text-decoration-none text-info fs-5" href="mailto:information@tieyoh.com">information@tieyoh.com</a>
+            </div>
         </div>
+    </div>
+    <p class="text-muted small mt-4">
+        A submittable contact form isn't wired up yet &mdash; it needs an outbound email service
+        (e.g. SendGrid or Azure Communication Services) connected on the backend. This scaffold ships
+        with the mailto links above as a placeholder until that's added.
+    </p>
+    <div class="mt-4">
+        <h2 class="h5 fw-bold">Already a member?</h2>
+        <p class="text-muted">Log in to reach us through your account, or browse the data room for existing answers.</p>
+        <a th:href="@{/auth/login}" class="btn btn-outline-dark">Member login</a>
     </div>
 </section>
 

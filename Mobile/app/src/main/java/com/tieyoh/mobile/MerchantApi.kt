@@ -1,4 +1,34 @@
 package com.tieyoh.mobile
 
-class MerchantApi {
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.GET
+import retrofit2.http.Query
+
+interface MerchantApi {
+
+    @GET("api/merchants/mobile")
+    suspend fun getMerchants(): List<MerchantDto>
+
+    @GET("api/merchants/mobile/search")
+    suspend fun searchMerchants(
+        @Query("name") name: String? = null,
+        @Query("zip") zip: String? = null,
+        @Query("address") address: String? = null,
+        @Query("merchantType") merchantType: String? = null
+    ): List<MerchantDto>
+}
+
+object RetrofitClient {
+
+    private const val BASE_URL =
+        "http://192.168.68.78:8080/"
+
+    val merchantApi: MerchantApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(MerchantApi::class.java)
+    }
 }

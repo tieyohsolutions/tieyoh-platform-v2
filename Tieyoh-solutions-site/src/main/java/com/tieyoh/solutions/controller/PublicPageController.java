@@ -45,4 +45,9 @@ public class PublicPageController {
     public String contact() {
         return "contact";
     }
+
+    @GetMapping("/careers")
+    public String careers() {
+        return "careers";
+    }
 }

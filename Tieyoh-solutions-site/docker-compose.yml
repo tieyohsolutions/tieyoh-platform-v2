@@ -1,19 +1,17 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16
     container_name: tieyoh-solutions-db
     environment:
       POSTGRES_DB: tieyoh_solutions
-      POSTGRES_USER: tieyoh
-      POSTGRES_PASSWORD: tieyoh
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in your .env file}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file}
     ports:
       - "5433:5432"
     volumes:
       - tieyoh_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tieyoh"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:?Set DB_USER in your .env file}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -26,10 +24,10 @@ services:
         condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tieyoh_solutions
-      SPRING_DATASOURCE_USERNAME: tieyoh
-      SPRING_DATASOURCE_PASSWORD: tieyoh
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:?Set DB_USER in your .env file}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tieyoh.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your .env file}
       ADMIN_NAME: ${ADMIN_NAME:-Tieyoh Admin}
     ports:
       - "8080:8080"

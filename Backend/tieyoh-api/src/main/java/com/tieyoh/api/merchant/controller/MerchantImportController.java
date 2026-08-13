@@ -1,6 +1,7 @@
 package com.tieyoh.api.merchant.controller;
 
 import com.tieyoh.api.merchant.dto.MerchantImportRecord;
+import com.tieyoh.api.merchant.dto.MerchantImportResponse;
 import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.service.MerchantImportService;
 import org.springframework.http.ResponseEntity;
@@ -17,11 +18,21 @@ public class MerchantImportController {
     }
 
     @PostMapping
-    public ResponseEntity<Merchant> importMerchant(
+    public ResponseEntity<MerchantImportResponse> importMerchant(
             @RequestBody MerchantImportRecord record) {
 
-        Merchant savedMerchant = merchantImportService.importMerchant(record);
+        Merchant merchant = merchantImportService.importMerchant(record);
 
-        return ResponseEntity.ok(savedMerchant);
+        MerchantImportResponse response = new MerchantImportResponse();
+
+        response.setId(merchant.getId());
+        response.setPmid(merchant.getParentMerchant().getPmid());
+        response.setTmid(merchant.getTmid());
+        response.setBrandName(merchant.getBrandName());
+        response.setSource(merchant.getSource());
+        response.setSourceMerchantId(merchant.getSourceMerchantId());
+        response.setStatus(merchant.getStatus());
+
+        return ResponseEntity.ok(response);
     }
 }

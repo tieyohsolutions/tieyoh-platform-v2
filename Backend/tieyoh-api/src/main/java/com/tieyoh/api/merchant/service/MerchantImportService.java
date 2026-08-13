@@ -5,6 +5,7 @@ import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.entity.MerchantLocation;
 import com.tieyoh.api.merchant.entity.ParentMerchant;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class MerchantImportService {
@@ -23,6 +24,7 @@ public class MerchantImportService {
         this.parentMerchantService = parentMerchantService;
     }
 
+   @Transactional
     public Merchant importMerchant(MerchantImportRecord record) {
 
         Merchant existingMerchant = merchantService

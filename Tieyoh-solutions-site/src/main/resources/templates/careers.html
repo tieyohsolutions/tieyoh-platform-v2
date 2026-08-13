@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Careers')}"></head>
+<body>
+<nav th:replace="~{fragments/layout :: navbar}"></nav>
+
+<header class="bg-light py-5">
+    <div class="container">
+        <h1 class="fw-bold">Careers at Tieyoh</h1>
+        <p class="lead text-muted col-lg-9">Join us as we build the merchant-connected gifting platform of the future.</p>
+    </div>
+</header>
+
+<section class="container py-5">
+    <div class="text-center text-muted py-5">
+        <h2 class="h4 fw-bold mb-3">No open positions right now</h2>
+        <p class="col-lg-6 mx-auto">We don't have any open roles at the moment, but we're growing quickly. Check back soon,
+            or reach out to <a th:href="@{/contact}">our team</a> if you'd like to introduce yourself.</p>
+    </div>
+</section>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+<script th:replace="~{fragments/layout :: scripts}"></script>
+</body>
+</html>

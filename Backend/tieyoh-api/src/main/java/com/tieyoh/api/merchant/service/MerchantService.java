@@ -20,21 +20,30 @@ public class MerchantService {
         return merchantRepository.findAll();
     }
 
+    public List<Merchant> getAllMerchantsWithParent() {
+        return merchantRepository.findAllWithParentMerchant();
+    }
+
+    public List<Merchant> searchEligibleMerchants(
+            String name,
+            String zip,
+            String address,
+            String merchantType) {
+
+        return merchantRepository.searchEligibleMerchants(
+                normalize(name),
+                normalize(zip),
+                normalizeAddress(address),
+                normalize(merchantType)
+        );
+    }
+
     public Optional<Merchant> getMerchantById(Long id) {
         return merchantRepository.findById(id);
     }
 
     public Optional<Merchant> getMerchantByTmid(String tmid) {
         return merchantRepository.findByTmid(tmid);
-    }
-
-    public Optional<Merchant> getMerchantBySource(
-            String source,
-            String sourceMerchantId) {
-
-        return merchantRepository.findBySourceAndSourceMerchantId(
-                source,
-                sourceMerchantId);
     }
 
     public Merchant saveMerchant(Merchant merchant) {
@@ -52,21 +61,36 @@ public class MerchantService {
         return merchantRepository.existsByTmid(tmid);
     }
 
+    public Optional<Merchant> getMerchantBySource(
+            String source,
+            String sourceMerchantId) {
+
+        return merchantRepository.findBySourceAndSourceMerchantId(
+                source,
+                sourceMerchantId
+        );
+    }
+
     public Optional<Merchant> deactivateMerchant(Long id) {
 
-        Optional<Merchant> merchantOptional =
-                merchantRepository.findById(id);
+        return merchantRepository.findById(id)
+                .map(merchant -> {
+                    merchant.setStatus("INACTIVE");
+                    return merchantRepository.save(merchant);
+                });
+    }
 
-        if (merchantOptional.isEmpty()) {
-            return Optional.empty();
+    private String normalize(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
+        return value.trim();
+    }
 
-        Merchant merchant = merchantOptional.get();
-        merchant.setStatus("INACTIVE");
-
-        return Optional.of(
-                merchantRepository.save(merchant)
-        
-            );
+    private String normalizeAddress(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().replace(",", " ").replaceAll("\s+", " ");
     }
 }

@@ -10,5 +10,6 @@
             "database": "tieyoh",
             "username": "tieyoh"
         }
-    ]
+    ],
+    "java.compile.nullAnalysis.mode": "automatic"
 }
