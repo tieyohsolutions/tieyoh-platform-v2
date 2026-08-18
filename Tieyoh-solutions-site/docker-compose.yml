@@ -29,6 +29,13 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tieyoh.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your .env file}
       ADMIN_NAME: ${ADMIN_NAME:-Tieyoh Admin}
+      MAIL_HOST: ${MAIL_HOST:-smtp.fastmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-hany.georgy@tieyoh.com}
+      NOTIFY_EMAIL: ${NOTIFY_EMAIL:-hany.georgy@tieyoh.com}
+      NOTIFY_SMS_EMAIL: ${NOTIFY_SMS_EMAIL:-}
     ports:
       - "8080:8080"
     volumes:

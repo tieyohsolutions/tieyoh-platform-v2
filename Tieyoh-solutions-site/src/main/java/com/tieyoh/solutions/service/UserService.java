@@ -19,6 +19,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final NotificationService notificationService;
 
     private static final String ALPHANUM = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
     private final SecureRandom random = new SecureRandom();
@@ -37,7 +38,9 @@ public class UserService {
                 .role(Role.MEMBER)
                 .status(UserStatus.PENDING_APPROVAL)
                 .build();
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        notificationService.sendNewSignupAlert(saved.getName(), saved.getEmail(), saved.getCompany());
+        return saved;
     }
 
     @Transactional
