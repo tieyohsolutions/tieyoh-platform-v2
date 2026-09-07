@@ -9,6 +9,16 @@
             "name": "Tieyoh Local PostgresSQL",
             "database": "tieyoh",
             "username": "tieyoh"
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "Tieyoh Local PostgresSQL - Mac",
+            "database": "tieyoh",
+            "username": "tieyoh"
         }
     ],
     "java.compile.nullAnalysis.mode": "automatic"

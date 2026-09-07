@@ -1,0 +1,26 @@
+package com.tieyoh.api.auth.dto;
+
+public class ConnectionRequestBody {
+
+    private Long senderId;
+    private Long recipientId;
+
+    public ConnectionRequestBody() {
+    }
+
+    public Long getSenderId() {
+        return senderId;
+    }
+
+    public void setSenderId(Long senderId) {
+        this.senderId = senderId;
+    }
+
+    public Long getRecipientId() {
+        return recipientId;
+    }
+
+    public void setRecipientId(Long recipientId) {
+        this.recipientId = recipientId;
+    }
+}
