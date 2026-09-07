@@ -37,4 +37,32 @@ object RetrofitClient {
     val authApi: AuthApi by lazy {
         retrofit.create(AuthApi::class.java)
     }
+
+    val userApi: UserApi by lazy {
+        retrofit.create(UserApi::class.java)
+    }
+
+    val friendApi: FriendApi by lazy {
+        retrofit.create(FriendApi::class.java)
+    }
+
+    val connectionRequestApi: ConnectionRequestApi by lazy {
+        retrofit.create(ConnectionRequestApi::class.java)
+    }
+
+    val notificationApi: NotificationApi by lazy {
+        retrofit.create(NotificationApi::class.java)
+    }
+
+    val invitationApi: InvitationApi by lazy {
+        retrofit.create(InvitationApi::class.java)
+    }
+
+    val feedApi: FeedApi by lazy {
+        retrofit.create(FeedApi::class.java)
+    }
+
+    val giftApi: GiftApi by lazy {
+        retrofit.create(GiftApi::class.java)
+    }
 }

@@ -1,34 +1,67 @@
 package com.tieyoh.mobile
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.text.format.DateUtils
+import android.util.Base64
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.sin
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tieyoh.mobile.ui.theme.TieyohAccent
+import com.tieyoh.mobile.ui.theme.TieyohBlue
+import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBorder
 import com.tieyoh.mobile.ui.theme.TieyohCardBg
-import com.tieyoh.mobile.ui.theme.TieyohFabRing
 import com.tieyoh.mobile.ui.theme.TieyohGiftRed
 import com.tieyoh.mobile.ui.theme.TieyohMuted
 import com.tieyoh.mobile.ui.theme.TieyohNavInactive
@@ -38,32 +71,700 @@ import com.tieyoh.mobile.ui.theme.TieyohSponsoredBody
 import com.tieyoh.mobile.ui.theme.TieyohSponsoredHeading
 import com.tieyoh.mobile.ui.theme.TieyohSponsoredLabel
 import com.tieyoh.mobile.ui.theme.TieyohSponsoredLogoBg
+import com.tieyoh.mobile.ui.theme.TieyohTealGradient
 import com.tieyoh.mobile.ui.theme.TieyohTheme
 import com.tieyoh.mobile.ui.theme.TieyohTrack
+import com.google.gson.Gson
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
+import java.time.LocalDate
 
-class MainActivity : ComponentActivity() {
+// Tracks where the person is in the sign-up journey: logged out, mid-onboarding
+// (choosing a Tieyoh ID / adding merchants), or fully into the app.
+// Which screen a logged-out person is on, within the Sep 2026
+// onboarding redesign: Welcome (brand moment) -> Get Started (phone +
+// email) -> Login/Signup (the existing form). Local to the LoggedOut
+// branch below, not part of SessionState, since none of it survives
+// past actually authenticating.
+private enum class LoggedOutStep { WELCOME, GET_STARTED, VERIFY_CODE, CREATE_PASSWORD, LOGIN }
+private enum class ProfileStep { CHOOSE_ID, PRIVACY, DETAILS, FIND_FRIENDS, CONTACTS_PERMISSION, PEOPLE_YOU_MAY_KNOW }
+
+private sealed class SessionState {
+    object LoggedOut : SessionState()
+    object NeedsBiometricUnlock : SessionState()
+    data class NeedsProfile(val user: AuthResponse) : SessionState()
+    data class NeedsMerchants(val user: AuthResponse) : SessionState()
+    data class NeedsPaymentMethod(val user: AuthResponse) : SessionState()
+    data class NeedsSendGiftSetup(val user: AuthResponse) : SessionState()
+    data class NeedsBiometricEnroll(val user: AuthResponse, val isNewSignup: Boolean) : SessionState()
+    data class OnboardingComplete(val user: AuthResponse) : SessionState()
+    data class LoggedIn(val user: AuthResponse) : SessionState()
+}
+
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             TieyohTheme {
-                var authenticatedUser by remember { mutableStateOf<AuthResponse?>(null) }
+                val context = LocalContext.current
 
-                val user = authenticatedUser
-                if (user == null) {
-                    LoginScreen(
-                        onAuthenticated = { response -> authenticatedUser = response }
+                // "Keep me logged in" is opt-in on the login screen; when
+                // chosen, we remember the signed-in user locally so the next
+                // app launch skips straight past the password prompt.
+                var rememberSession by remember { mutableStateOf(true) }
+
+                var sessionState by remember {
+                    mutableStateOf<SessionState>(
+                        when {
+                            BiometricSessionStore.isEnrolled(context) -> SessionState.NeedsBiometricUnlock
+                            else -> SessionStore.load(context)?.let { SessionState.LoggedIn(it) }
+                                ?: SessionState.LoggedOut
+                        }
                     )
-                } else {
-                    TieyohApp(
-                        currentUser = user,
-                        onLogout = { authenticatedUser = null }
-                    )
+                }
+
+                // Hoisted out of the NeedsProfile branch below (was local to
+                // it) so it survives sessionState moving on to
+                // NeedsMerchants / NeedsPaymentMethod / OnboardingComplete
+                // and back -- otherwise leaving NeedsProfile disposed this
+                // state entirely, and coming back via a Back arrow reset
+                // profileStep to CHOOSE_ID instead of returning to whatever
+                // step the person actually left from.
+                var profileStep by remember { mutableStateOf(ProfileStep.CHOOSE_ID) }
+                var pendingTieyohId by remember { mutableStateOf<String?>(null) }
+                var profileCompleteUser by remember { mutableStateOf<AuthResponse?>(null) }
+                var pendingHandle by remember { mutableStateOf("") }
+                var pendingHandleAvailable by remember { mutableStateOf(false) }
+                var pendingPrivacyAgreed by remember { mutableStateOf(false) }
+                var pendingBirthDate by remember { mutableStateOf<LocalDate?>(null) }
+                var pendingGender by remember { mutableStateOf<String?>(null) }
+                var pendingHolidaysCelebrated by remember { mutableStateOf(setOf<String>()) }
+                var pendingAddress by remember { mutableStateOf("") }
+
+                // isNewSignup distinguishes "just finished creating an
+                // account" (NeedsSendGiftSetup's onDone, below) from a
+                // normal returning login (LoginScreen's onAuthenticated,
+                // below). The biometric-enroll offer still shows either way
+                // the same as it always has (first time this device hasn't
+                // enrolled yet) -- only the new "You're all set!" screen is
+                // gated to the signup path, so a plain login lands straight
+                // on the Feed instead of seeing it too.
+                fun enterApp(user: AuthResponse, isNewSignup: Boolean) {
+                    if (rememberSession) {
+                        SessionStore.save(context, user)
+                    }
+                    val activity = context as? FragmentActivity
+                    if (activity != null &&
+                        !BiometricSessionStore.isEnrolled(context) &&
+                        BiometricAuthHelper.isBiometricAvailable(activity)
+                    ) {
+                        sessionState = SessionState.NeedsBiometricEnroll(user, isNewSignup)
+                    } else if (isNewSignup) {
+                        sessionState = SessionState.OnboardingComplete(user)
+                    } else {
+                        sessionState = SessionState.LoggedIn(user)
+                    }
+                }
+
+                when (val state = sessionState) {
+                    is SessionState.NeedsBiometricUnlock -> {
+                        BiometricUnlockScreen(
+                            activity = this@MainActivity,
+                            onUnlocked = { user ->
+                                sessionState = SessionState.LoggedIn(user)
+                            },
+                            onUseFallback = {
+                                sessionState = SessionStore.load(context)?.let { SessionState.LoggedIn(it) }
+                                    ?: SessionState.LoggedOut
+                            }
+                        )
+                    }
+
+                    is SessionState.LoggedOut -> {
+                        // The brand-moment Welcome screen (Sep 2026 redesign)
+                        // is the actual first screen now -- LoginScreen only
+                        // shows once the person has picked Create Account or
+                        // Log In, in the matching mode. Local to this branch
+                        // since it resets naturally on sign-out (a fresh
+                        // SessionState.LoggedOut recomposition).
+                        var loggedOutStep by remember { mutableStateOf(LoggedOutStep.WELCOME) }
+                        var startInSignupMode by remember { mutableStateOf(false) }
+                        // Carries what GetStartedScreen collected forward to
+                        // VerifyCodeScreen -- nothing here is submitted
+                        // anywhere yet (see VerifyCodeScreen's own note on
+                        // the backend having no SMS delivery), this is just
+                        // local state for the screen-to-screen handoff.
+                        var pendingFirstName by remember { mutableStateOf("") }
+                        var pendingLastName by remember { mutableStateOf("") }
+                        var pendingPhone by remember { mutableStateOf("") }
+                        var pendingEmail by remember { mutableStateOf("") }
+
+                        // Same reasoning as pendingFirstName/etc. above --
+                        // hoisted so Create Password and Log In don't reset
+                        // to blank if the user backs out and comes back.
+                        // Verification codes are the one deliberate
+                        // exception (VerifyCodeScreen, and LoginScreen's own
+                        // in-progress signup-code step) -- those stay local
+                        // to their screens, never hoisted here.
+                        var pendingPassword by remember { mutableStateOf("") }
+                        var pendingConfirmPassword by remember { mutableStateOf("") }
+                        var pendingLoginEmail by remember { mutableStateOf("") }
+                        var pendingLoginPassword by remember { mutableStateOf("") }
+                        var pendingLoginDisplayName by remember { mutableStateOf("") }
+                        var pendingLoginRememberMe by remember { mutableStateOf(true) }
+
+                        val loggedOutScope = rememberCoroutineScope()
+                        // The backend only has email-based OTP delivery
+                        // (LoggingOtpMailSender prints the code to the
+                        // server console in dev rather than actually
+                        // emailing it -- see OtpService/AuthController).
+                        // There's no SMS provider, so this new flow's
+                        // verification step is wired to that same
+                        // email-based endpoint even though the screen's
+                        // copy talks about the phone number -- the phone
+                        // is display-only here for now.
+                        fun requestSignupOtp(email: String, phone: String? = null, onSuccess: () -> Unit = {}) {
+                            loggedOutScope.launch {
+                                try {
+                                    val response = RetrofitClient.authApi.requestOtp(
+                                        OtpRequestRequest(email = email.trim(), purpose = "SIGNUP", phone = phone)
+                                    )
+                                    if (response.isSuccessful) {
+                                        onSuccess()
+                                    } else {
+                                        val message = if (response.code() == 409) {
+                                            // Email and phone are checked together server-side, so a 409
+                                            // here could be either -- this stays generic rather than
+                                            // guessing which one.
+                                            "An account with this email or phone number already exists -- try logging in instead."
+                                        } else {
+                                            "Couldn't send a verification code (code ${response.code()}). Please try again."
+                                        }
+                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Couldn't reach the server. Is tieyoh-api running?", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+
+                        when (loggedOutStep) {
+                            LoggedOutStep.WELCOME -> {
+                                WelcomeScreen(
+                                    onCreateAccount = {
+                                        loggedOutStep = LoggedOutStep.GET_STARTED
+                                    },
+                                    onLogIn = {
+                                        startInSignupMode = false
+                                        loggedOutStep = LoggedOutStep.LOGIN
+                                    }
+                                )
+                            }
+
+                            LoggedOutStep.GET_STARTED -> {
+                                GetStartedScreen(
+                                    initialFirstName = pendingFirstName,
+                                    initialLastName = pendingLastName,
+                                    initialPhone = pendingPhone,
+                                    initialEmail = pendingEmail,
+                                    onFieldsChanged = { firstName, lastName, phone, email ->
+                                        pendingFirstName = firstName
+                                        pendingLastName = lastName
+                                        pendingPhone = phone
+                                        pendingEmail = email
+                                    },
+                                    onBack = { loggedOutStep = LoggedOutStep.WELCOME },
+                                    onLogIn = {
+                                        startInSignupMode = false
+                                        loggedOutStep = LoggedOutStep.LOGIN
+                                    },
+                                    onContinue = { firstName, lastName, phone, email ->
+                                        pendingFirstName = firstName
+                                        pendingLastName = lastName
+                                        pendingPhone = phone
+                                        pendingEmail = email
+                                        requestSignupOtp(email, phone) {
+                                            loggedOutStep = LoggedOutStep.VERIFY_CODE
+                                        }
+                                    }
+                                )
+                            }
+
+                            LoggedOutStep.VERIFY_CODE -> {
+                                VerifyCodeScreen(
+                                    phone = pendingPhone,
+                                    onBack = { loggedOutStep = LoggedOutStep.GET_STARTED },
+                                    onVerify = { code ->
+                                        loggedOutScope.launch {
+                                            try {
+                                                val response = RetrofitClient.authApi.verifyOtp(
+                                                    OtpVerifyRequest(
+                                                        email = pendingEmail.trim(),
+                                                        purpose = "SIGNUP",
+                                                        code = code.trim()
+                                                    )
+                                                )
+                                                if (response.isSuccessful) {
+                                                    loggedOutStep = LoggedOutStep.CREATE_PASSWORD
+                                                } else {
+                                                    val message = when (response.code()) {
+                                                        400 -> "That code isn't right or has expired -- try again or resend it."
+                                                        429 -> "Too many attempts -- request a new code."
+                                                        else -> "Something went wrong (code ${response.code()}). Please try again."
+                                                    }
+                                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Couldn't reach the server. Is tieyoh-api running?", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    },
+                                    onResend = {
+                                        requestSignupOtp(pendingEmail, pendingPhone) {
+                                            Toast.makeText(context, "Code resent.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+                            }
+
+                            LoggedOutStep.CREATE_PASSWORD -> {
+                                CreatePasswordScreen(
+                                    initialPassword = pendingPassword,
+                                    initialConfirmPassword = pendingConfirmPassword,
+                                    onFieldsChanged = { password, confirmPassword ->
+                                        pendingPassword = password
+                                        pendingConfirmPassword = confirmPassword
+                                    },
+                                    onBack = { loggedOutStep = LoggedOutStep.VERIFY_CODE },
+                                    onContinue = { password ->
+                                        loggedOutScope.launch {
+                                            try {
+                                                val displayName = listOf(pendingFirstName, pendingLastName)
+                                                    .filter { it.isNotBlank() }
+                                                    .joinToString(" ")
+                                                    .ifBlank { pendingEmail.substringBefore("@") }
+                                                val response = RetrofitClient.authApi.signup(
+                                                    SignupRequest(
+                                                        email = pendingEmail.trim(),
+                                                        password = password,
+                                                        displayName = displayName,
+                                                        firstName = pendingFirstName.ifBlank { null },
+                                                        lastName = pendingLastName.ifBlank { null },
+                                                        phone = pendingPhone.ifBlank { null }
+                                                    )
+                                                )
+                                                rememberSession = true
+                                                sessionState = SessionState.NeedsProfile(response)
+                                            } catch (e: HttpException) {
+                                                val message = when (e.code()) {
+                                                    409 -> "An account with this email already exists -- try logging in instead."
+                                                    400 -> "Please verify your email again before creating an account."
+                                                    else -> "Something went wrong (code ${e.code()}). Please try again."
+                                                }
+                                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Couldn't reach the server. Is tieyoh-api running?", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+
+                            LoggedOutStep.LOGIN -> {
+                                LoginScreen(
+                                    initialEmail = pendingLoginEmail,
+                                    initialPassword = pendingLoginPassword,
+                                    initialDisplayName = pendingLoginDisplayName,
+                                    initialRememberMe = pendingLoginRememberMe,
+                                    onFieldsChanged = { email, password, displayName, rememberMe ->
+                                        pendingLoginEmail = email
+                                        pendingLoginPassword = password
+                                        pendingLoginDisplayName = displayName
+                                        pendingLoginRememberMe = rememberMe
+                                    },
+                                    startInSignupMode = startInSignupMode,
+                                    onBack = { loggedOutStep = LoggedOutStep.WELCOME },
+                                    onAuthenticated = { response, remember, isSignup ->
+                                        rememberSession = remember
+                                        // Route by whether profile setup (@t id /
+                                        // phone / sex) has actually been completed,
+                                        // not just by whether this was a fresh
+                                        // signup -- a returning user whose account
+                                        // never finished that screen (backed out,
+                                        // app was killed mid-setup, etc.) still
+                                        // needs to go through it, the same as right
+                                        // after signing up. Checking isSignup alone
+                                        // let those accounts straight into the home
+                                        // feed with no Tieyoh ID, ever, on every
+                                        // later login.
+                                        if (isSignup || response.tieyohId.isNullOrBlank()) {
+                                            sessionState = SessionState.NeedsProfile(response)
+                                        } else {
+                                            // A normal returning login --
+                                            // isNewSignup = false sends this
+                                            // straight to the Feed, skipping
+                                            // the biometric-enroll offer
+                                            // (already handled, if needed)
+                                            // and skipping "You're all set!"
+                                            // entirely, since that's a
+                                            // one-time signup moment, not
+                                            // something every login should
+                                            // show.
+                                            enterApp(response, isNewSignup = false)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    is SessionState.NeedsProfile -> {
+                        // Split across three screens now (@t id, then the
+                        // privacy/consent step, then phone/gender/etc.)
+                        // instead of one long form -- same backend calls as
+                        // before (check-id, then saveProfile), just spread
+                        // the collection out to match the new step-by-step
+                        // onboarding UX.
+                        // profileStep and the pendingX fields below are now
+                        // hoisted to the top level (see above enterApp) so
+                        // they survive a round trip out to NeedsMerchants /
+                        // NeedsPaymentMethod and back via those screens'
+                        // Back arrows.
+                        when (profileStep) {
+                            ProfileStep.CHOOSE_ID -> {
+                                ChooseIdScreen(
+                                    initialHandle = pendingHandle,
+                                    initialAvailable = pendingHandleAvailable,
+                                    onHandleStateChanged = { handle, available ->
+                                        pendingHandle = handle
+                                        pendingHandleAvailable = available
+                                    },
+                                    // No real "back" target exists yet this early
+                                    // in profile setup (the account already
+                                    // exists at this point) -- falling back to
+                                    // the logged-out flow is a safe default since
+                                    // a PENDING_PROFILE account can always log
+                                    // back in and pick up here again.
+                                    onBack = { sessionState = SessionState.LoggedOut },
+                                    onContinue = { id ->
+                                        pendingTieyohId = id
+                                        profileStep = ProfileStep.PRIVACY
+                                    }
+                                )
+                            }
+
+                            ProfileStep.PRIVACY -> {
+                                PrivacyExplainedScreen(
+                                    initialAgreed = pendingPrivacyAgreed,
+                                    onAgreedChanged = { pendingPrivacyAgreed = it },
+                                    onBack = { profileStep = ProfileStep.CHOOSE_ID },
+                                    onContinue = { profileStep = ProfileStep.DETAILS }
+                                )
+                            }
+
+                            ProfileStep.DETAILS -> {
+                                ProfileSetupScreen(
+                                    tieyohId = pendingTieyohId ?: "",
+                                    currentUser = state.user,
+                                    initialBirthDate = pendingBirthDate,
+                                    initialGender = pendingGender,
+                                    initialHolidaysCelebrated = pendingHolidaysCelebrated,
+                                    initialAddress = pendingAddress,
+                                    onFieldsChanged = { birthDate, gender, holidaysCelebrated, address ->
+                                        pendingBirthDate = birthDate
+                                        pendingGender = gender
+                                        pendingHolidaysCelebrated = holidaysCelebrated
+                                        pendingAddress = address
+                                    },
+                                    onBack = { profileStep = ProfileStep.PRIVACY },
+                                    onProfileComplete = { updated ->
+                                        profileCompleteUser = updated
+                                        profileStep = ProfileStep.FIND_FRIENDS
+                                    }
+                                )
+                            }
+
+                            ProfileStep.FIND_FRIENDS -> {
+                                // profileCompleteUser is always set by the time this
+                                // step is reached (DETAILS always sets it right before
+                                // advancing here) -- state.user is the fallback only
+                                // for the type system, never actually used in practice.
+                                val updatedUser = profileCompleteUser ?: state.user
+                                FindFriendsScreen(
+                                    onBack = { profileStep = ProfileStep.DETAILS },
+                                    onFindFriends = { profileStep = ProfileStep.CONTACTS_PERMISSION },
+                                    onMaybeLater = { sessionState = SessionState.NeedsMerchants(updatedUser) }
+                                )
+                            }
+
+                            ProfileStep.CONTACTS_PERMISSION -> {
+                                val updatedUser = profileCompleteUser ?: state.user
+                                ContactsPermissionScreen(
+                                    onBack = { profileStep = ProfileStep.FIND_FRIENDS },
+                                    onAllowed = { profileStep = ProfileStep.PEOPLE_YOU_MAY_KNOW },
+                                    // Don't Allow, Maybe Later, or backing out of the
+                                    // real OS permission dialog all skip the contacts
+                                    // step altogether and go straight to merchant
+                                    // selection -- same destination "Maybe Later" on
+                                    // the previous screen already uses.
+                                    onSkip = { sessionState = SessionState.NeedsMerchants(updatedUser) }
+                                )
+                            }
+
+                            ProfileStep.PEOPLE_YOU_MAY_KNOW -> {
+                                val updatedUser = profileCompleteUser ?: state.user
+                                PeopleYouMayKnowScreen(
+                                    ownerTieyohId = updatedUser.tieyohId ?: "",
+                                    onBack = { profileStep = ProfileStep.CONTACTS_PERMISSION },
+                                    onDone = { sessionState = SessionState.NeedsMerchants(updatedUser) }
+                                )
+                            }
+                        }
+                    }
+
+                    is SessionState.NeedsMerchants -> {
+                        MerchantSelectionScreen(
+                            currentUser = state.user,
+                            onBack = {
+                                // profileStep is still PEOPLE_YOU_MAY_KNOW
+                                // from before -- it's hoisted now, so
+                                // re-entering NeedsProfile lands back on
+                                // the same step instead of resetting to
+                                // CHOOSE_ID.
+                                sessionState = SessionState.NeedsProfile(state.user)
+                            },
+                            onDone = {
+                                sessionState = SessionState.NeedsPaymentMethod(state.user)
+                            }
+                        )
+                    }
+
+                    is SessionState.NeedsPaymentMethod -> {
+                        PaymentMethodSetupScreen(
+                            onBack = {
+                                sessionState = SessionState.NeedsMerchants(state.user)
+                            },
+                            onDone = {
+                                sessionState = SessionState.NeedsSendGiftSetup(state.user)
+                            }
+                        )
+                    }
+
+                    is SessionState.NeedsSendGiftSetup -> {
+                        SendGiftPromptScreen(
+                            currentUserId = state.user.id,
+                            ownerTieyohId = state.user.tieyohId.orEmpty(),
+                            onDone = {
+                                // The tail end of a brand-new signup --
+                                // this is the one path that should still
+                                // see "You're all set!" (via enterApp).
+                                enterApp(state.user, isNewSignup = true)
+                            },
+                            onBack = {
+                                sessionState = SessionState.NeedsPaymentMethod(state.user)
+                            }
+                        )
+                    }
+
+                    is SessionState.NeedsBiometricEnroll -> {
+                        BiometricEnrollScreen(
+                            activity = this@MainActivity,
+                            user = state.user,
+                            onDone = {
+                                sessionState = if (state.isNewSignup) {
+                                    SessionState.OnboardingComplete(state.user)
+                                } else {
+                                    SessionState.LoggedIn(state.user)
+                                }
+                            }
+                        )
+                    }
+
+                    is SessionState.OnboardingComplete -> {
+                        OnboardingCompleteScreen(
+                            onBack = {
+                                // SendGiftPromptScreen (the last regular
+                                // step before the enter-app/biometric
+                                // machinery) has no Back arrow of its own
+                                // yet -- this at least stops the arrow here
+                                // from skipping straight into the Feed.
+                                sessionState = SessionState.NeedsSendGiftSetup(state.user)
+                            },
+                            onGoToFeed = {
+                                sessionState = SessionState.LoggedIn(state.user)
+                            }
+                        )
+                    }
+
+                    is SessionState.LoggedIn -> {
+                        TieyohApp(
+                            currentUser = state.user,
+                            onLogout = {
+                                SessionStore.clear(context)
+                                BiometricSessionStore.clear(context)
+                                BiometricAuthHelper.deleteKey()
+                                sessionState = SessionState.LoggedOut
+                            },
+                            onUserUpdated = { updated ->
+                                // Edit Profile can change email now, which
+                                // this screen (and the header on Profile)
+                                // reads straight off currentUser -- persist
+                                // and swap in the fresh copy so neither goes
+                                // stale until the next login.
+                                SessionStore.save(context, updated)
+                                sessionState = SessionState.LoggedIn(updated)
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+// Shown at launch when a biometric-gated session exists (see
+// BiometricSessionStore). Immediately prompts Face ID / Touch ID /
+// fingerprint to decrypt the cached session; falls back to the normal
+// login flow (or a remembered plain session) if the user cancels or it
+// fails for any reason.
+@Composable
+private fun BiometricUnlockScreen(
+    activity: FragmentActivity,
+    onUnlocked: (AuthResponse) -> Unit,
+    onUseFallback: () -> Unit
+) {
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        val stored = BiometricSessionStore.readCiphertext(context)
+        if (stored == null) {
+            onUseFallback()
+            return@LaunchedEffect
+        }
+        val (ciphertext, iv) = stored
+        try {
+            val json = BiometricAuthHelper.decryptWithBiometrics(
+                activity = activity,
+                title = "Unlock Tieyoh",
+                subtitle = "Use your biometric to sign in",
+                ciphertextB64 = ciphertext,
+                ivB64 = iv
+            )
+            val user = BiometricSessionStore.parseUser(json)
+            if (user != null) {
+                onUnlocked(user)
+            } else {
+                onUseFallback()
+            }
+        } catch (e: Exception) {
+            onUseFallback()
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.tieyoh_logo),
+            contentDescription = "Tieyoh",
+            modifier = Modifier.height(40.dp)
+        )
+        Spacer(Modifier.height(24.dp))
+        CircularProgressIndicator(color = TieyohAccent)
+        Spacer(Modifier.height(16.dp))
+        Text("Waiting for biometric unlock…", color = TieyohMuted, fontSize = 14.sp)
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "Use password instead",
+            color = TieyohAccent,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.clickable { onUseFallback() }
+        )
+    }
+}
+
+// Offered right after a successful signup or password login on a device
+// that hasn't enrolled biometrics yet (see MainActivity.enterApp()).
+// Skippable — declining just leaves the existing plain SessionStore
+// session in place, unchanged from before this feature existed.
+@Composable
+private fun BiometricEnrollScreen(
+    activity: FragmentActivity,
+    user: AuthResponse,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val gson = remember { Gson() }
+
+    fun enable() {
+        coroutineScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val json = gson.toJson(user)
+                val (ciphertext, iv) = BiometricAuthHelper.encryptWithBiometrics(
+                    activity = activity,
+                    title = "Set up faster sign-in",
+                    subtitle = "Confirm with your biometric to enable this",
+                    plaintext = json
+                )
+                BiometricSessionStore.save(context, ciphertext, iv)
+                SessionStore.clear(context)
+                onDone()
+            } catch (e: Exception) {
+                errorMessage = "Couldn't enable biometric sign-in. You can try again later from Profile."
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            "Set up faster sign-in",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = TieyohNavy
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Use Face ID, Touch ID, or your fingerprint to open Tieyoh next time — no password needed on this device.",
+            color = TieyohMuted,
+            fontSize = 14.sp
+        )
+
+        errorMessage?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        TieyohPrimaryButton(
+            text = "Enable biometric sign-in",
+            onClick = { enable() },
+            enabled = !isLoading,
+            isLoading = isLoading
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        TieyohSecondaryButton(text = "Skip for now", onClick = onDone)
     }
 }
 
@@ -75,7 +776,21 @@ private enum class TieyohScreen {
     MY_CARD,
     PROFILE,
     SEND_GIFT,
-    SEARCH_MERCHANT
+    SEND_GIFT_MERCHANT_SEARCH,
+    SEARCH_MERCHANT,
+    INVITE_CONTACT,
+    CHOOSE_RECIPIENT,
+    INVITE_FRIENDS,
+    PAYMENT_METHODS,
+    WEBSITE,
+    NOTIFICATIONS,
+    EDIT_PROFILE,
+    PRIVACY_SETTINGS,
+    GIFT_SENT,
+    GIFT_RECEIVED,
+    CONFIRM_CONNECTION,
+    ALL_CIRCLE,
+    MY_QR_CODE
 }
 
 private data class WishTarget(
@@ -86,47 +801,110 @@ private data class WishTarget(
 
 private data class MerchantAllocation(
     val merchant: String,
-    val amount: Double
+    val amount: Double,
+    val isTieyohMerchant: Boolean = true
 )
 
 @Composable
 fun TieyohApp(
     currentUser: AuthResponse,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onUserUpdated: (AuthResponse) -> Unit = {}
 ) {
+    val feedContext = LocalContext.current
 
     var currentScreen by remember {
         mutableStateOf(TieyohScreen.FEED)
+    }
+    // Who the "Send" flow (or an active circle member tapped from the add
+    // screen) is currently sending a gift to -- set right before jumping
+    // into SEND_GIFT so that screen can show who it's for.
+    var giftRecipient by remember { mutableStateOf<FriendResult?>(null) }
+    // The merchant chosen (either from the recipient's favorites or via the
+    // 'Other' round trip through SEND_GIFT_MERCHANT_SEARCH) for the gift
+    // currently being composed in SEND_GIFT.
+    var giftMerchant by remember { mutableStateOf<MerchantDto?>(null) }
+
+    // Info for the sender's full-screen "You sent a gift!" confirmation,
+    // and the gift id for the recipient's "You received a gift!" one --
+    // set right before jumping into GIFT_SENT / GIFT_RECEIVED so those
+    // screens have what they need without extra plumbing through the
+    // TieyohScreen enum itself.
+    var sentGiftInfo by remember { mutableStateOf<SentGiftInfo?>(null) }
+    var receivedGiftId by remember { mutableStateOf<Long?>(null) }
+
+    // Set when the recipient taps "Thank <sender>" on GIFT_RECEIVED --
+    // that button drops them back on the Feed with this quick-reply
+    // overlay showing, rather than a separate screen (see ThankSenderSheet).
+    var pendingThank by remember { mutableStateOf<PendingThank?>(null) }
+
+    // Set when a name tapped inside a feed item belongs to someone who
+    // isn't a direct circle member yet -- routes to CONFIRM_CONNECTION
+    // instead of straight into the gift flow. See FeedScreen's
+    // classifyAndRoute.
+    var pendingConnectionTarget by remember { mutableStateOf<PendingConnectionTarget?>(null) }
+
+    var hasUnreadNotifications by remember { mutableStateOf(false) }
+
+    // Cheap stand-in for a real push/badge system: just check once when the
+    // app comes up whether there's anything unread, so the bell shows a dot
+    // without the user having to open it first. While the notifications
+    // screen itself is open, NotificationsScreen's onUnreadChanged keeps
+    // this in sync live as individual notifications get tapped/read --
+    // this initial check only covers before that screen has ever loaded.
+    LaunchedEffect(currentUser.id) {
+        try {
+            hasUnreadNotifications = RetrofitClient.notificationApi
+                .getNotifications(currentUser.id)
+                .any { !it.read }
+        } catch (e: Exception) {
+            // Leave it as-is -- no badge is better than a wrong one.
+        }
     }
 
     Scaffold(
         topBar = {
             TieyohTopBar(
                 onLogoClick = {
-                    currentScreen = TieyohScreen.FEED
-                }
+                    currentScreen = TieyohScreen.WEBSITE
+                },
+                onAddClick = {
+                    currentScreen = TieyohScreen.INVITE_CONTACT
+                },
+                onBellClick = {
+                    currentScreen = TieyohScreen.NOTIFICATIONS
+                },
+                hasUnreadNotifications = hasUnreadNotifications
             )
         },
         bottomBar = {
-            TieyohBottomNavigation(
+            TieyohBottomBar(
                 currentScreen = currentScreen,
                 onNavigate = { screen ->
                     currentScreen = screen
-                }
+                },
+                onSendClick = { currentScreen = TieyohScreen.CHOOSE_RECIPIENT }
             )
-        },
-        floatingActionButton = {
-            SendFab(
-                onClick = { currentScreen = TieyohScreen.SEND_GIFT }
-            )
-        },
-        floatingActionButtonPosition = FabPosition.Center
+        }
     ) { innerPadding ->
 
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                // Scaffold's innerPadding only accounts for the bottom
+                // bar's own laid-out height -- it has no way to know that
+                // the circular Send FAB inside TieyohBottomBar pokes up
+                // ~38dp above the bar's top edge via a paint-only offset
+                // (offset() doesn't change measured/layout bounds). Every
+                // screen below effectively got 38dp less real clearance
+                // than innerPadding promised, which is what let the FAB
+                // sit on top of whatever a screen put at its own bottom
+                // edge (seen on the QR page and the payment-method page).
+                // Reserving that space once, here, for every screen is
+                // the actual fix, instead of patching each screen's own
+                // bottom spacing one at a time as this keeps coming up.
+                .padding(bottom = 48.dp),
             color = MaterialTheme.colorScheme.background
         ) {
 
@@ -134,7 +912,82 @@ fun TieyohApp(
 
                 TieyohScreen.FEED -> {
                     FeedScreen(
-                        onSeeFullFeed = { /* full feed list — coming soon */ }
+                        currentUser = currentUser,
+                        onGiftPerson = { person ->
+                            if (person.userId == currentUser.id) {
+                                Toast.makeText(feedContext, "You can't send a gift to yourself", Toast.LENGTH_SHORT).show()
+                                return@FeedScreen
+                            }
+                            giftMerchant = null
+                            giftRecipient = FriendResult(
+                                id = 0L,
+                                contactUserId = person.userId,
+                                displayName = person.displayName,
+                                tieyohId = person.tieyohId,
+                                phone = null,
+                                email = null,
+                                status = "ACTIVE",
+                                profilePictureBase64 = person.profilePictureBase64
+                            )
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        onGiftFeedPerson = { person ->
+                            if (person.userId == currentUser.id) {
+                                Toast.makeText(feedContext, "You can't send a gift to yourself", Toast.LENGTH_SHORT).show()
+                                return@FeedScreen
+                            }
+                            giftMerchant = null
+                            giftRecipient = FriendResult(
+                                id = 0L,
+                                contactUserId = person.userId,
+                                displayName = person.displayName,
+                                tieyohId = person.tieyohId,
+                                phone = null,
+                                email = null,
+                                status = "ACTIVE",
+                                profilePictureBase64 = person.profilePictureBase64
+                            )
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        onConnectFeedPerson = { target ->
+                            pendingConnectionTarget = target
+                            currentScreen = TieyohScreen.CONFIRM_CONNECTION
+                        },
+                        onSendGiftClick = { currentScreen = TieyohScreen.CHOOSE_RECIPIENT },
+                        onSeeAllCircle = { currentScreen = TieyohScreen.ALL_CIRCLE },
+                        onAddToCircle = { currentScreen = TieyohScreen.INVITE_CONTACT },
+                        pendingThank = pendingThank,
+                        onDismissThank = { pendingThank = null }
+                    )
+                }
+
+                TieyohScreen.ALL_CIRCLE -> {
+                    AllCircleScreen(
+                        currentUserId = currentUser.id,
+                        onBack = { currentScreen = TieyohScreen.FEED },
+                        onAddToCircle = { currentScreen = TieyohScreen.INVITE_CONTACT },
+                        onGiftPerson = { person ->
+                            if (person.userId == currentUser.id) {
+                                Toast.makeText(feedContext, "You can't send a gift to yourself", Toast.LENGTH_SHORT).show()
+                                return@AllCircleScreen
+                            }
+                            giftMerchant = null
+                            giftRecipient = FriendResult(
+                                id = 0L,
+                                contactUserId = person.userId,
+                                displayName = person.displayName,
+                                tieyohId = person.tieyohId,
+                                phone = null,
+                                email = null,
+                                status = "ACTIVE",
+                                profilePictureBase64 = person.profilePictureBase64
+                            )
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        onConnectPerson = { target ->
+                            pendingConnectionTarget = target
+                            currentScreen = TieyohScreen.CONFIRM_CONNECTION
+                        }
                     )
                 }
 
@@ -143,10 +996,44 @@ fun TieyohApp(
                 TieyohScreen.MY_CARD -> MyCardScreen()
 
                 TieyohScreen.SEND_GIFT -> {
+                    val recipient = giftRecipient
+                    if (recipient == null) {
+                        // Shouldn't happen -- SEND_GIFT is only ever entered with a
+                        // recipient already chosen -- but bounce back to the feed
+                        // rather than crash if it does.
+                        LaunchedEffect(Unit) { currentScreen = TieyohScreen.FEED }
+                    } else {
+                        SendGiftScreen(
+                            currentUserId = currentUser.id,
+                            recipient = recipient,
+                            selectedMerchant = giftMerchant,
+                            onSelectMerchant = { giftMerchant = it },
+                            onSearchOtherMerchant = { currentScreen = TieyohScreen.SEND_GIFT_MERCHANT_SEARCH },
+                            onSent = { info ->
+                                giftMerchant = null
+                                giftRecipient = null
+                                sentGiftInfo = info
+                                currentScreen = TieyohScreen.GIFT_SENT
+                            },
+                            onCancel = {
+                                giftMerchant = null
+                                giftRecipient = null
+                                currentScreen = TieyohScreen.FEED
+                            }
+                        )
+                    }
+                }
+
+                TieyohScreen.SEND_GIFT_MERCHANT_SEARCH -> {
                     MerchantSearchScreen(
-                        title = "Send a Gift",
-                        subtitle = "Choose a merchant for the gift. Recipient selection comes next.",
-                        actionLabel = "Search Eligible Merchants"
+                        title = "Search for a Merchant",
+                        subtitle = "Find another merchant for this gift.",
+                        actionLabel = "Search Merchants",
+                        onMerchantSelected = { merchant ->
+                            giftMerchant = merchant
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        onBack = { currentScreen = TieyohScreen.SEND_GIFT }
                     )
                 }
 
@@ -154,197 +1041,1169 @@ fun TieyohApp(
                     MerchantSearchScreen(
                         title = "Search for a Merchant",
                         subtitle = "Search the Tieyoh merchant registry.",
-                        actionLabel = "Search Merchants"
+                        actionLabel = "Search Merchants",
+                        onBack = { currentScreen = TieyohScreen.FEED }
                     )
                 }
 
-                TieyohScreen.PROFILE -> ProfileScreen(currentUser = currentUser, onLogout = onLogout)
+                TieyohScreen.PROFILE -> ProfileScreen(
+                    currentUser = currentUser,
+                    onLogout = onLogout,
+                    onManagePaymentMethods = { currentScreen = TieyohScreen.PAYMENT_METHODS },
+                    onEditProfile = { currentScreen = TieyohScreen.EDIT_PROFILE },
+                    onPrivacySettings = { currentScreen = TieyohScreen.PRIVACY_SETTINGS },
+                    onViewQrCode = { currentScreen = TieyohScreen.MY_QR_CODE },
+                    onProfileUpdated = onUserUpdated
+                )
+
+                TieyohScreen.MY_QR_CODE -> {
+                    MyQrCodeScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.PROFILE }
+                    )
+                }
+
+                TieyohScreen.INVITE_CONTACT -> {
+                    ContactsInviteScreen(
+                        currentUserId = currentUser.id,
+                        ownerTieyohId = currentUser.tieyohId.orEmpty(),
+                        onDone = { currentScreen = TieyohScreen.FEED },
+                        onSelectRecipient = { friend ->
+                            giftMerchant = null
+                            giftRecipient = friend
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        onInviteFriendsClick = { currentScreen = TieyohScreen.INVITE_FRIENDS }
+                    )
+                }
+
+                TieyohScreen.INVITE_FRIENDS -> {
+                    InviteFriendsScreen(
+                        ownerTieyohId = currentUser.tieyohId.orEmpty(),
+                        onDone = { currentScreen = TieyohScreen.INVITE_CONTACT }
+                    )
+                }
+
+                TieyohScreen.CHOOSE_RECIPIENT -> {
+                    ContactsInviteScreen(
+                        currentUserId = currentUser.id,
+                        ownerTieyohId = currentUser.tieyohId.orEmpty(),
+                        onDone = { currentScreen = TieyohScreen.FEED },
+                        onSelectRecipient = { friend ->
+                            giftMerchant = null
+                            giftRecipient = friend
+                            currentScreen = TieyohScreen.SEND_GIFT
+                        },
+                        title = "Send a gift to",
+                        subtitle = "Pick someone from your circle, or invite them to join Tieyoh.",
+                        doneLabel = "Cancel"
+                    )
+                }
+
+                TieyohScreen.PAYMENT_METHODS -> {
+                    PaymentMethodSetupScreen(
+                        onDone = { currentScreen = TieyohScreen.PROFILE },
+                        doneButtonLabel = "Done"
+                    )
+                }
+
+                TieyohScreen.WEBSITE -> {
+                    TieyohWebsiteScreen(
+                        onDone = { currentScreen = TieyohScreen.FEED }
+                    )
+                }
+
+                TieyohScreen.NOTIFICATIONS -> {
+                    NotificationsScreen(
+                        currentUserId = currentUser.id,
+                        onUnreadChanged = { stillUnread -> hasUnreadNotifications = stillUnread },
+                        onDone = { currentScreen = TieyohScreen.FEED },
+                        onOpenGift = { giftId ->
+                            receivedGiftId = giftId
+                            currentScreen = TieyohScreen.GIFT_RECEIVED
+                        }
+                    )
+                }
+
+                TieyohScreen.EDIT_PROFILE -> {
+                    EditProfileScreen(
+                        currentUserId = currentUser.id,
+                        onDone = { currentScreen = TieyohScreen.PROFILE },
+                        onProfileUpdated = onUserUpdated
+                    )
+                }
+
+                TieyohScreen.PRIVACY_SETTINGS -> {
+                    PrivacySettingsScreen(
+                        currentUserId = currentUser.id,
+                        onDone = { currentScreen = TieyohScreen.PROFILE }
+                    )
+                }
+
+                TieyohScreen.GIFT_SENT -> {
+                    val info = sentGiftInfo
+                    if (info == null) {
+                        // Shouldn't happen -- GIFT_SENT is only ever
+                        // entered right after a successful send -- but
+                        // bounce back to the feed rather than crash if it
+                        // does (matches the SEND_GIFT null-recipient guard
+                        // above).
+                        LaunchedEffect(Unit) { currentScreen = TieyohScreen.FEED }
+                    } else {
+                        GiftSentScreen(
+                            info = info,
+                            onSendToSomeoneElse = {
+                                sentGiftInfo = null
+                                currentScreen = TieyohScreen.CHOOSE_RECIPIENT
+                            },
+                            onBackToFeed = {
+                                sentGiftInfo = null
+                                currentScreen = TieyohScreen.FEED
+                            }
+                        )
+                    }
+                }
+
+                TieyohScreen.GIFT_RECEIVED -> {
+                    val giftId = receivedGiftId
+                    if (giftId == null) {
+                        LaunchedEffect(Unit) { currentScreen = TieyohScreen.FEED }
+                    } else {
+                        GiftReceivedScreen(
+                            giftId = giftId,
+                            onThankSender = { senderId, senderDisplayName ->
+                                pendingThank = PendingThank(
+                                    giftId = giftId,
+                                    senderId = senderId,
+                                    senderDisplayName = senderDisplayName
+                                )
+                                receivedGiftId = null
+                                currentScreen = TieyohScreen.FEED
+                            },
+                            onBackToFeed = {
+                                receivedGiftId = null
+                                currentScreen = TieyohScreen.FEED
+                            }
+                        )
+                    }
+                }
+
+                TieyohScreen.CONFIRM_CONNECTION -> {
+                    val target = pendingConnectionTarget
+                    if (target == null) {
+                        // Shouldn't happen -- this screen is only ever
+                        // entered right after tapping a non-circle name in
+                        // the feed -- but bounce back rather than crash.
+                        LaunchedEffect(Unit) { currentScreen = TieyohScreen.FEED }
+                    } else {
+                        ConfirmConnectionScreen(
+                            currentUserId = currentUser.id,
+                            target = target,
+                            onCancel = {
+                                pendingConnectionTarget = null
+                                currentScreen = TieyohScreen.FEED
+                            },
+                            onRequestSent = {
+                                pendingConnectionTarget = null
+                                currentScreen = TieyohScreen.FEED
+                            }
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+// Tapping the Tieyoh wordmark opens this instead of just jumping back to
+// the feed -- it hands off to the real Tieyoh website. Doubles right now
+// as a clean way to test whether taps on the LEFT side of the top bar
+// (far from the invite icon's spot near the camera cutout) are reliable.
+@Composable
+private fun TieyohWebsiteScreen(
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    val websiteUrl = "https://www.tieyoh.com"
+
+    LaunchedEffect(Unit) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(websiteUrl))
+        context.startActivity(intent)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopStart)
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "←",
+                fontSize = 20.sp,
+                color = TieyohNavy,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .clickable { onDone() }
+            )
+        }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Opening tieyoh.com",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Taking you to the Tieyoh website in your browser.",
+            color = TieyohMuted
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        TieyohPrimaryButton(
+            text = "Open tieyoh.com",
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(websiteUrl))
+                context.startActivity(intent)
+            }
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TieyohSecondaryButton(text = "Back to feed", onClick = onDone)
+    }
     }
 }
 
 @Composable
 private fun TieyohTopBar(
-    onLogoClick: () -> Unit
+    onLogoClick: () -> Unit,
+    onAddClick: () -> Unit,
+    onBellClick: () -> Unit,
+    hasUnreadNotifications: Boolean = false
 ) {
 
     Surface(
-        color = TieyohNavy,
+        color = Color.White,
         shadowElevation = 0.dp
     ) {
 
-        Row(
+        // The app targets a modern SDK where edge-to-edge is enforced by the
+        // system -- our content draws all the way to the top of the screen,
+        // behind the status bar and the front-camera cutout, whether we ask
+        // for that or not. Without this padding the logo/icon row started
+        // right at y=0: part of it sat visually behind the cutout (the
+        // "head chopped off" clipping) and touches in that same top band
+        // never reached our clickable() at all (the "only clicks under the
+        // camera" dead zone) -- true for BOTH the logo on the left and the
+        // invite icon on the right, since it's a full-width band, not a
+        // left/right issue. Pushing the row below the status bar + cutout
+        // safe area fixes both. The white Surface background above still
+        // extends under the status bar for a seamless look.
+        Column(
+            modifier = Modifier.windowInsetsPadding(
+                WindowInsets.statusBars.union(WindowInsets.displayCutout)
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Box {
+                    Text(
+                        text = "\uD83D\uDD14",
+                        fontSize = 20.sp,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .wrapContentHeight(Alignment.CenterVertically)
+                            .clickable { onBellClick() }
+                    )
+                    if (hasUnreadNotifications) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(TieyohGiftRed)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // Left-aligned (not centered) so the front camera cutout on
+                // notched phones never sits on top of the wordmark.
+                Image(
+                    painter = painterResource(id = R.drawable.tieyoh_logo),
+                    contentDescription = "Tieyoh",
+                    modifier = Modifier
+                        .height(26.dp)
+                        .clickable { onLogoClick() }
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                InvitePeopleIcon(
+                    onClick = onAddClick
+                )
+            }
+
+            HorizontalDivider(color = TieyohBorder, thickness = 1.dp)
+        }
+    }
+}
+
+// The person+plus glyph is a real drawable (ic_invite_person.png) rather
+// than something drawn by hand in Canvas -- communicates "add someone to
+// your circle" more clearly than a bare plus sign, since this same button
+// doubles as the general invite entry point (top bar + bottom-nav Send
+// flow both eventually funnel here).
+@Composable
+private fun InvitePeopleIcon(
+    onClick: () -> Unit
+) {
+    // A single, explicitly-sized Box is the ONLY thing that determines the
+    // clickable area -- deliberately not IconButton. Testing showed
+    // IconButton's own internal sizing layers put the real clickable
+    // region somewhere different from where it visually rendered. A plain
+    // Box with one .size() and .clickable() has no hidden internal layers
+    // to fight with, and the Image fills that exact same Box, so the
+    // drawn pixels and the tappable area are, by construction, the same
+    // rectangle.
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_invite_person),
+            contentDescription = "Invite someone to Tieyoh",
             modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp)
-                .padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .padding(4.dp)
+        )
+    }
+}
+
+@Composable
+private fun TieyohBottomBar(
+    currentScreen: TieyohScreen,
+    onNavigate: (TieyohScreen) -> Unit,
+    onSendClick: () -> Unit
+) {
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+
+        NavigationBar(
+            containerColor = Color.White,
+            contentColor = TieyohNavInactive,
+            modifier = Modifier.padding(top = 16.dp)
         ) {
 
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = Color.White)) { append("tie") }
-                    withStyle(SpanStyle(color = Color(0xFF5EEAD4))) { append("yoh") }
-                },
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.clickable { onLogoClick() }
+            TieyohNavItem(
+                screen = TieyohScreen.FEED,
+                currentScreen = currentScreen,
+                onNavigate = onNavigate,
+                glyph = "▤",
+                label = "Feed"
+            )
+
+            TieyohNavItem(
+                screen = TieyohScreen.MY_LIST,
+                currentScreen = currentScreen,
+                onNavigate = onNavigate,
+                glyph = "☰",
+                label = "My list"
+            )
+
+            TieyohNavItem(
+                screen = TieyohScreen.MY_CARD,
+                currentScreen = currentScreen,
+                onNavigate = onNavigate,
+                glyph = "▭",
+                label = "My card"
+            )
+
+            TieyohNavItem(
+                screen = TieyohScreen.PROFILE,
+                currentScreen = currentScreen,
+                onNavigate = onNavigate,
+                glyph = "◔",
+                label = "Profile"
+            )
+        }
+
+        // Gift-bag Send FAB, nudged up so it pokes above the bar.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = (-38).dp)
+                .size(80.dp)
+                .clickable { onSendClick() }
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_send_fab),
+                contentDescription = "Send a gift",
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // A perfectly flat, horizontal black line at the same baseline
+        // height the whole way across -- under Feed/My list, My card/
+        // Profile, AND right up to the Send icon, with no rise or curve
+        // beforehand. It meets the icon's own true circle (same measured
+        // center/radius from ic_send_fab.png, so the seam still lands
+        // exactly on the icon's real edge and stays hidden) at a point
+        // below its equator rather than at the very left/right tip, then
+        // sweeps under it in a shallower-than-180-degree dip before
+        // returning to the same flat baseline -- shallower on purpose, so
+        // it doesn't eat as much vertical space as a full half-moon would.
+        // Small rounded curls stay at each far end (unchanged). Drawn LAST
+        // so it flows above (in front of) both the nav bar and the icon.
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(76.dp)
+                .align(Alignment.TopCenter)
+                .offset(y = (-40).dp)
+        ) {
+            val leftPad = 22.dp.toPx()
+            val rightPad = 22.dp.toPx()
+            val baseline = 56.dp.toPx()
+            val centerX = size.width / 2f
+            // Measured from ic_send_fab.png: the visible black-bordered
+            // circle sits almost dead-center of the 80.dp FAB box with a
+            // ~35.dp radius (44% of the 80.dp box).
+            val ringCenterY = 41.dp.toPx()
+            val ringRadius = 35.dp.toPx()
+            // Small rounded "drop" at each tip of the line instead of a
+            // flat stroke-cap ending.
+            val hookRun = 10.dp.toPx()
+            val hookDrop = 12.dp.toPx()
+
+            // Find where the icon's TRUE circle (same measured radius)
+            // crosses the flat baseline height, below the circle's own
+            // equator -- that's where the flat line hands off to the arc.
+            // Using the real radius keeps the seam exactly on the icon's
+            // own edge (hidden there) while letting the flat run stay
+            // level all the way in, and the resulting sweep is naturally
+            // less than a full 180 semicircle.
+            val refAngleRad = asin(((baseline - ringCenterY) / ringRadius).coerceIn(-1f, 1f))
+            val refAngleDeg = Math.toDegrees(refAngleRad.toDouble()).toFloat()
+            val leftAngleDeg = 180f - refAngleDeg
+            val rightAngleDeg = refAngleDeg
+            val sweepDeg = rightAngleDeg - leftAngleDeg
+
+            val leftAttach = Offset(
+                centerX + ringRadius * cos(Math.toRadians(leftAngleDeg.toDouble())).toFloat(),
+                baseline
+            )
+            val rightAttach = Offset(
+                centerX + ringRadius * cos(Math.toRadians(rightAngleDeg.toDouble())).toFloat(),
+                baseline
+            )
+
+            val path = Path().apply {
+                // Rounded drop at the very start of the line.
+                moveTo(leftPad - hookRun, baseline + hookDrop)
+                quadraticTo(leftPad - hookRun, baseline, leftPad, baseline)
+                // Perfectly flat and level all the way to the icon -- no
+                // rise, no curve.
+                lineTo(leftAttach.x, baseline)
+                // A shallower-than-half-circle dip -- still exactly the
+                // icon's own true edge, just not swept all the way around.
+                arcTo(
+                    rect = Rect(
+                        left = centerX - ringRadius,
+                        top = ringCenterY - ringRadius,
+                        right = centerX + ringRadius,
+                        bottom = ringCenterY + ringRadius
+                    ),
+                    startAngleDegrees = leftAngleDeg,
+                    sweepAngleDegrees = sweepDeg,
+                    forceMoveTo = false
+                )
+                // Flat and level again on the way out.
+                lineTo(size.width - rightPad, baseline)
+                // Rounded drop at the very end of the line.
+                quadraticTo(
+                    size.width - rightPad + hookRun, baseline,
+                    size.width - rightPad + hookRun, baseline + hookDrop
+                )
+            }
+
+            drawPath(
+                path = path,
+                color = TieyohNavy,
+                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
         }
     }
 }
 
 @Composable
-private fun SendFab(onClick: () -> Unit) {
-    // Outer light ring + red gift-bag center, matching the reference
-    // screenshot the user shared (red FAB instead of the teal one).
-    Box(
+private fun RowScope.TieyohNavItem(
+    screen: TieyohScreen,
+    currentScreen: TieyohScreen,
+    onNavigate: (TieyohScreen) -> Unit,
+    glyph: String,
+    label: String
+) {
+    NavigationBarItem(
+        selected = currentScreen == screen,
+        onClick = { onNavigate(screen) },
+        icon = { Text(glyph, fontSize = 20.sp) },
+        label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+        colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = TieyohAccent,
+            selectedTextColor = TieyohAccent,
+            unselectedIconColor = TieyohNavInactive,
+            unselectedTextColor = TieyohNavInactive,
+            indicatorColor = Color.Transparent
+        )
+    )
+}
+
+// Sample social-feed content. There's no feed backend yet, so this stands
+// in for what a real "activity from people you follow" endpoint will
+// eventually return. Intended ranking criteria for the real feed (more
+// conditions to be layered on later):
+//   - message-exchange history with the viewer's contacts on Tieyoh
+//   - sponsored/ad content relevant to the viewer and their area
+//   - activity where someone has set a target for a gift amount
+// The feed is a single continuously scrollable list — no "see more" step.
+// Kept only so WishTargetCard/SponsoredCard below stay available as
+// reusable components (per the Interactive Feed spec: don't delete UI
+// pieces just because the data source changed) even though nothing
+// constructs these anymore now that the Feed is backend-driven. Renamed
+// from the old bare "FeedItem" -- that name now belongs to the real
+// backend-driven item shape in FeedApi.kt, and both types living in the
+// same package would otherwise collide.
+private sealed class LegacyFeedItem {
+    data class Wish(
+        val person: String,
+        val merchant: String,
+        val current: Int,
+        val goal: Int,
+        val timeAgo: String,
+        val supporters: Int
+    ) : LegacyFeedItem()
+
+    data class Transaction(
+        val initials: String,
+        val actor: String,
+        val amount: Int,
+        val recipient: String,
+        val merchant: String,
+        val timeAgo: String
+    ) : LegacyFeedItem()
+
+    data class Sponsored(
+        val initials: String,
+        val merchant: String,
+        val offer: String
+    ) : LegacyFeedItem()
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun FeedScreen(
+    currentUser: AuthResponse,
+    onGiftPerson: (FeedPersonResult) -> Unit,
+    onGiftFeedPerson: (FeedPerson) -> Unit,
+    // A name tapped inside a feed item (GiftActivityCard, BirthdayCard)
+    // that isn't a direct circle member -- see classifyAndRoute below.
+    // Opens a dedicated confirm screen instead of firing a connection
+    // request immediately.
+    onConnectFeedPerson: (PendingConnectionTarget) -> Unit = {},
+    onSendGiftClick: () -> Unit,
+    // "See all" opens the full circle grid (AllCircleScreen); the "+" chip
+    // at the end of the row reuses the same add-to-circle flow as the top
+    // bar's own "+" icon.
+    onSeeAllCircle: () -> Unit = {},
+    onAddToCircle: () -> Unit = {},
+    pendingThank: PendingThank? = null,
+    onDismissThank: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val currentUserId = currentUser.id
+
+    var network by remember { mutableStateOf<List<FeedPersonResult>>(emptyList()) }
+    var networkLoaded by remember { mutableStateOf(false) }
+    var networkLoadFailed by remember { mutableStateOf(false) }
+
+    // Real, backend-driven Feed state (Interactive Social/Gifting Feed spec,
+    // sections 14-16). isLoadingFeed covers the very first load; isRefreshing
+    // covers pull-to-refresh; isLoadingMore covers the "Load more" footer --
+    // kept separate so each shows its own spinner without hiding the list.
+    var feedItems by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
+    var feedPage by remember { mutableStateOf(0) }
+    var hasMoreFeed by remember { mutableStateOf(false) }
+    var isLoadingFeed by remember { mutableStateOf(true) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var feedError by remember { mutableStateOf<String?>(null) }
+
+    suspend fun loadFirstPage(showSpinner: Boolean) {
+        if (showSpinner) isLoadingFeed = true
+        feedError = null
+        when (val result = FeedRepository.loadPage(currentUserId, page = 0)) {
+            is FeedPageResult.Success -> {
+                feedItems = result.items
+                hasMoreFeed = result.hasMore
+                feedPage = 0
+            }
+            is FeedPageResult.Error -> {
+                feedError = result.message
+            }
+        }
+        isLoadingFeed = false
+    }
+
+    fun loadMore() {
+        if (isLoadingMore || !hasMoreFeed) return
+        coroutineScope.launch {
+            isLoadingMore = true
+            val nextPage = feedPage + 1
+            when (val result = FeedRepository.loadPage(currentUserId, page = nextPage)) {
+                is FeedPageResult.Success -> {
+                    feedItems = feedItems + result.items
+                    hasMoreFeed = result.hasMore
+                    feedPage = nextPage
+                }
+                is FeedPageResult.Error -> {
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                }
+            }
+            isLoadingMore = false
+        }
+    }
+
+    LaunchedEffect(currentUserId) {
+        network = try {
+            RetrofitClient.friendApi.getNetwork(currentUserId)
+        } catch (e: Exception) {
+            networkLoadFailed = true
+            emptyList()
+        }
+        networkLoaded = true
+        loadFirstPage(showSpinner = true)
+    }
+
+    // "Your circle" shows direct members plus anyone with a connection
+    // request pending in either direction, so sending a request from the
+    // new confirm screen is immediately visible here (with a pending
+    // badge) rather than the person just disappearing from the row. Pure
+    // friend-of-a-friend contacts with no request yet are still excluded.
+    val circleRow = network.filter { it.relationship == "DIRECT" || it.connectionRequestStatus != null }
+
+    // A name tapped inside a feed item (sender/recipient on a gift card, a
+    // birthday card's person) routes differently depending on whether
+    // they're already a direct circle member: DIRECT -> straight into the
+    // gift flow, same as always. Anyone else (a friend-of-a-friend surfaced
+    // by the feed's visibility rules, or someone reachable via a PUBLIC
+    // gift) -> a dedicated confirm-connection screen instead of silently
+    // firing a request on a single tap.
+    fun classifyAndRoute(person: FeedPerson) {
+        // A feed item can name the current user themselves (e.g. Hannah
+        // shows up as the sender/recipient of her own past gift) -- that's
+        // not someone to gift or connect with, so this has to be checked
+        // before the network lookup below, which won't find a viewer's own
+        // id in their own network list anyway and would otherwise fall
+        // through to "not connected yet, send a request".
+        if (person.userId == currentUserId) return
+        val match = network.firstOrNull { it.userId == person.userId }
+        if (match?.relationship == "DIRECT") {
+            onGiftFeedPerson(person)
+        } else {
+            onConnectFeedPerson(
+                PendingConnectionTarget(
+                    userId = person.userId,
+                    displayName = person.displayName,
+                    tieyohId = person.tieyohId,
+                    profilePictureBase64 = person.profilePictureBase64,
+                    connectionRequestStatus = match?.connectionRequestStatus
+                )
+            )
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            coroutineScope.launch {
+                isRefreshing = true
+                loadFirstPage(showSpinner = false)
+                isRefreshing = false
+            }
+        },
+        state = rememberPullToRefreshState(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(top = 22.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+
+            item {
+                Text(
+                    text = "Hi ${currentUser.displayName}, here's what your circle's up to",
+                    fontSize = 13.sp,
+                    color = TieyohMuted,
+                    lineHeight = 15.sp
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Matches the reference image: larger/bolder than
+                    // the section headers used to be, same navy as the
+                    // rest of the app's headings.
+                    Text(
+                        text = "Your circle",
+                        fontWeight = FontWeight.Bold,
+                        color = TieyohNavy,
+                        fontSize = 17.sp
+                    )
+                    if (circleRow.isNotEmpty()) {
+                        Text(
+                            text = "See all >",
+                            fontWeight = FontWeight.SemiBold,
+                            color = TieyohBrandBlue,
+                            fontSize = 14.sp,
+                            modifier = Modifier.clickable { onSeeAllCircle() }
+                        )
+                    }
+                }
+            }
+            item {
+                when {
+                    !networkLoaded -> {
+                        Box(modifier = Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.CenterStart) {
+                            CircularProgressIndicator(color = TieyohAccent, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    networkLoadFailed -> {
+                        Text("Couldn't load your circle", color = TieyohMuted, fontSize = 13.sp)
+                    }
+                    else -> {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            items(circleRow) { person ->
+                                NetworkPersonChip(
+                                    person = person,
+                                    onClick = {
+                                        if (person.relationship == "DIRECT") {
+                                            onGiftPerson(person)
+                                        } else {
+                                            onConnectFeedPerson(
+                                                PendingConnectionTarget(
+                                                    userId = person.userId,
+                                                    displayName = person.displayName,
+                                                    tieyohId = person.tieyohId,
+                                                    profilePictureBase64 = person.profilePictureBase64,
+                                                    connectionRequestStatus = person.connectionRequestStatus
+                                                )
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                            item {
+                                AddCircleChip(onClick = onAddToCircle)
+                            }
+                        }
+                    }
+                }
+            }
+
+            when {
+                isLoadingFeed -> {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = TieyohAccent)
+                        }
+                    }
+                }
+
+                feedError != null -> {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Couldn't load your feed",
+                                fontWeight = FontWeight.Bold,
+                                color = TieyohNavy
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = feedError ?: "",
+                                color = TieyohMuted,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            TieyohSecondaryButton(
+                                text = "Try again",
+                                onClick = { coroutineScope.launch { loadFirstPage(showSpinner = true) } },
+                                fillWidth = false
+                            )
+                        }
+                    }
+                }
+
+                feedItems.isEmpty() -> {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Nothing new yet.",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = TieyohNavy
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Send someone a gift and make their day.",
+                                color = TieyohMuted,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            TieyohPrimaryButton(
+                                text = "Send a Gift",
+                                onClick = onSendGiftClick,
+                                fillWidth = false
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    // Static placeholder ad -- there's no backend ad system
+                    // yet (see SponsoredCard/LegacyFeedItem.Sponsored), so
+                    // this is fixed sample content until one exists. Shown
+                    // once, right after the first real item, matching where
+                    // the old sample feed placed its own sponsored card.
+                    itemsIndexed(feedItems, key = { _, entry -> entry.eventId }) { index, entry ->
+                        FeedEventCard(
+                            item = entry,
+                            onPersonTapped = { person -> classifyAndRoute(person) },
+                            onSendGiftClick = onSendGiftClick
+                        )
+                        if (index == 0) {
+                            Spacer(Modifier.height(16.dp))
+                            SponsoredCard(
+                                item = LegacyFeedItem.Sponsored(
+                                    initials = "BL",
+                                    merchant = "Blue Bottle Coffee",
+                                    offer = "20% off this week with Tieyoh"
+                                )
+                            )
+                        }
+                    }
+
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (hasMoreFeed) {
+                                if (isLoadingMore) {
+                                    CircularProgressIndicator(
+                                        color = TieyohAccent,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                } else {
+                                    TieyohSecondaryButton(
+                                        text = "Load more",
+                                        onClick = { loadMore() },
+                                        fillWidth = false
+                                    )
+                                }
+                            } else {
+                                Text("You're all caught up", color = TieyohMuted, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rendered as a sibling overlay, not part of the LazyColumn above --
+    // this is what "Thank <sender>" on GiftReceivedScreen leads to (see
+    // ThankSenderSheet), matching the reference mockup's third screen
+    // ("where Thank leads"): a quick-reply surface over the live Feed,
+    // not a separate navigation destination.
+    pendingThank?.let { thank ->
+        ThankSenderSheet(
+            currentUserId = currentUser.id,
+            pendingThank = thank,
+            onDismiss = onDismissThank,
+            onSent = { coroutineScope.launch { loadFirstPage(showSpinner = false) } }
+        )
+    }
+}
+
+// Dispatches a single backend Feed item (Interactive Social/Gifting Feed
+// spec, section 8) to the right card by eventType. An event type this
+// build doesn't know about yet renders nothing rather than crashing, so
+// the backend can introduce new types (FRIEND_JOINED_TIEYOH, GIFT_RECEIVED,
+// etc.) without requiring an app update first.
+@Composable
+private fun FeedEventCard(
+    item: FeedItem,
+    onPersonTapped: (FeedPerson) -> Unit,
+    onSendGiftClick: () -> Unit
+) {
+    when (item.eventType) {
+        "GIFT_ACTIVITY" -> {
+            val sender = item.sender
+            val recipient = item.recipient
+            if (sender != null && recipient != null) {
+                GiftActivityCard(
+                    sender = sender,
+                    recipient = recipient,
+                    gift = item.gift,
+                    merchant = item.merchant,
+                    occurredAt = item.occurredAt,
+                    onPersonTapped = onPersonTapped
+                )
+            }
+        }
+
+        "UPCOMING_BIRTHDAY" -> {
+            val person = item.person
+            if (person != null) {
+                BirthdayCard(
+                    person = person,
+                    daysUntil = item.daysUntil ?: 0,
+                    onGiftPerson = onPersonTapped
+                )
+            }
+        }
+
+        "UPCOMING_HOLIDAY" -> {
+            HolidayCard(
+                holidayName = item.holidayName ?: "Upcoming holiday",
+                displayMessage = item.displayMessage ?: "",
+                onSendGiftClick = onSendGiftClick
+            )
+        }
+
+        else -> {
+            // Unrecognized/future event type -- nothing to render yet.
+        }
+    }
+}
+
+// Restored to the original feed's "gift activity" card look (avatar +
+// one wrapped sentence + a merchant/time subtitle line) per the user's
+// request to bring the feed's visual style back to how it looked before
+// the Sep 2, 2026 backend-driven rebuild -- this is the same layout
+// TransactionCard (below) already had for the old sample data, just fed
+// from the real backend item now. Sender and recipient still each need
+// to be their own tap target (spec section 9) even inside one wrapped
+// sentence, so this uses ClickableText with string annotations marking
+// each name's character range, rather than two separate Text composables
+// (which was correct but is what made this look different from the
+// original card in the first place).
+@Composable
+private fun GiftActivityCard(
+    sender: FeedPerson,
+    recipient: FeedPerson,
+    gift: FeedGiftInfo?,
+    merchant: FeedMerchantSummary?,
+    occurredAt: Long?,
+    onPersonTapped: (FeedPerson) -> Unit
+) {
+    val amountText = gift?.let { "\$${formatGiftAmount(it.amount)}" }
+    val timeText = occurredAt?.let {
+        DateUtils.getRelativeTimeSpanString(
+            it, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
+        ).toString()
+    }
+    val subtitle = listOfNotNull(merchant?.brandName, timeText).joinToString(" · ")
+
+    val sentence = remember(sender.displayName, recipient.displayName, amountText) {
+        buildAnnotatedString {
+            pushStringAnnotation(tag = "SENDER", annotation = "sender")
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TieyohNavy)) {
+                append(sender.displayName)
+            }
+            pop()
+            append(" sent ")
+            if (amountText != null) {
+                withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, color = TieyohAccent)) {
+                    append("$amountText gift")
+                }
+            } else {
+                append("a gift")
+            }
+            append(" to ")
+            pushStringAnnotation(tag = "RECIPIENT", annotation = "recipient")
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TieyohNavy)) {
+                append(recipient.displayName)
+            }
+            pop()
+        }
+    }
+
+    Row(
         modifier = Modifier
-            .size(64.dp)
-            .clip(CircleShape)
-            .background(Color.White)
-            .border(width = 2.dp, color = TieyohFabRing, shape = CircleShape)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(20.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(40.dp)
                 .clip(CircleShape)
-                .background(TieyohGiftRed),
+                .background(Brush.linearGradient(listOf(TieyohBlue, TieyohTealGradient))),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "\uD83C\uDF81",
-                fontSize = 24.sp
-            )
+            Text(personInitials(sender.displayName), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
         }
-    }
-}
-
-@Composable
-private fun TieyohBottomNavigation(
-    currentScreen: TieyohScreen,
-    onNavigate: (TieyohScreen) -> Unit
-) {
-
-    NavigationBar(
-        containerColor = Color.White,
-        contentColor = TieyohNavInactive
-    ) {
-
-        NavigationBarItem(
-            selected = currentScreen == TieyohScreen.FEED,
-            onClick = { onNavigate(TieyohScreen.FEED) },
-            icon = { Text("▤") },
-            label = { Text("Feed") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = TieyohAccent,
-                selectedTextColor = TieyohAccent,
-                unselectedIconColor = TieyohNavInactive,
-                unselectedTextColor = TieyohNavInactive,
-                indicatorColor = Color.Transparent
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            ClickableText(
+                text = sentence,
+                style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TieyohNavy),
+                onClick = { offset ->
+                    sentence.getStringAnnotations(tag = "SENDER", start = offset, end = offset)
+                        .firstOrNull()?.let { onPersonTapped(sender) }
+                    sentence.getStringAnnotations(tag = "RECIPIENT", start = offset, end = offset)
+                        .firstOrNull()?.let { onPersonTapped(recipient) }
+                }
             )
-        )
-
-        NavigationBarItem(
-            selected = currentScreen == TieyohScreen.MY_LIST,
-            onClick = { onNavigate(TieyohScreen.MY_LIST) },
-            icon = { Text("☰") },
-            label = { Text("My list") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = TieyohAccent,
-                selectedTextColor = TieyohAccent,
-                unselectedIconColor = TieyohNavInactive,
-                unselectedTextColor = TieyohNavInactive,
-                indicatorColor = Color.Transparent
-            )
-        )
-
-        NavigationBarItem(
-            selected = currentScreen == TieyohScreen.MY_CARD,
-            onClick = { onNavigate(TieyohScreen.MY_CARD) },
-            icon = { Text("▭") },
-            label = { Text("My card") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = TieyohAccent,
-                selectedTextColor = TieyohAccent,
-                unselectedIconColor = TieyohNavInactive,
-                unselectedTextColor = TieyohNavInactive,
-                indicatorColor = Color.Transparent
-            )
-        )
-
-        NavigationBarItem(
-            selected = currentScreen == TieyohScreen.PROFILE,
-            onClick = { onNavigate(TieyohScreen.PROFILE) },
-            icon = { Text("◔") },
-            label = { Text("Profile") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = TieyohAccent,
-                selectedTextColor = TieyohAccent,
-                unselectedIconColor = TieyohNavInactive,
-                unselectedTextColor = TieyohNavInactive,
-                indicatorColor = Color.Transparent
-            )
-        )
-    }
-}
-
-@Composable
-private fun FeedScreen(
-    onSeeFullFeed: () -> Unit
-) {
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(top = 22.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-
-        item {
-            Text(
-                text = "Hi Hany, here's what your circle's up to",
-                fontSize = 16.sp,
-                color = TieyohMuted
-            )
-        }
-
-        item { WishTargetCard() }
-
-        item { SponsoredCard() }
-
-        item {
-            TransactionCard(
-                initials = "ML",
-                headlinePrefix = "Marcus Lee sent a ",
-                giftLabel = "\$25 gift",
-                headlineSuffix = " to Priya Patel",
-                subtitle = "Whole Foods · 5h ago"
-            )
-        }
-
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.5.dp, TieyohAccent, RoundedCornerShape(14.dp))
-                    .clickable { onSeeFullFeed() }
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("See full feed", color = TieyohAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, fontSize = 13.sp, color = TieyohMuted)
+            }
+            gift?.comments?.forEach { comment ->
+                Spacer(Modifier.height(4.dp))
+                Row {
+                    Text(
+                        text = "${comment.authorDisplayName ?: "Someone"}: ",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = TieyohMuted
+                    )
+                    Text(
+                        text = comment.body,
+                        fontSize = 12.sp,
+                        color = TieyohMuted
+                    )
+                }
             }
         }
     }
 }
 
+// "Marcus Lee" -> "ML" -- first letter of up to the first two words,
+// matching the two-letter avatar initials the original feed cards used
+// (NetworkAvatar/SearchResultAvatar elsewhere in the app use just a
+// single first-letter initial instead; this is deliberately the one spot
+// that mimics the old two-letter style since that's the card being
+// restored here).
+private fun personInitials(displayName: String): String {
+    val words = displayName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    return words.take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("")
+        .ifBlank { "?" }
+}
+
+private fun formatGiftAmount(amount: Double): String {
+    return if (amount == Math.floor(amount)) amount.toLong().toString() else "%.2f".format(amount)
+}
+
 @Composable
-private fun WishTargetCard() {
+private fun BirthdayCard(person: FeedPerson, daysUntil: Int, onGiftPerson: (FeedPerson) -> Unit) {
+    val whenText = when (daysUntil) {
+        0 -> "today"
+        1 -> "tomorrow"
+        else -> "in $daysUntil days"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("🎂", fontSize = 30.sp)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "${person.displayName}'s birthday is $whenText",
+                fontWeight = FontWeight.Bold,
+                color = TieyohNavy
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(TieyohAccent)
+                    .clickable { onGiftPerson(person) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "Send ${person.displayName} a Gift",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+// No specific recipient for a holiday, so the CTA is a generic hand-off
+// into the same "choose a recipient" flow the center Send button uses.
+@Composable
+private fun HolidayCard(holidayName: String, displayMessage: String, onSendGiftClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -352,14 +2211,289 @@ private fun WishTargetCard() {
             .background(TieyohCardBg)
             .padding(20.dp)
     ) {
-        Text("Sarah Chen set a wish target", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+        Text(holidayName, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
         Spacer(Modifier.height(4.dp))
-        Text("Blue Bottle Coffee · 2h ago", fontSize = 14.sp, color = TieyohMuted)
+        Text(displayMessage, color = TieyohMuted, fontSize = 13.sp)
+        Spacer(Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(TieyohNavy)
+                .clickable(onClick = onSendGiftClick)
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+        ) {
+            Text("Send a Gift", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+    }
+}
+
+// Reached via "See all >" on the Feed's "Your circle" row. Same circle
+// membership rules as that row (DIRECT members plus anyone with a
+// connection request pending either direction) laid out as a grid instead
+// of a single scrolling row, with the same "+" add tile always last. The
+// bottom nav bar stays visible on this screen the same way it does on
+// every other TieyohScreen, so tapping Feed there works too -- the back
+// arrow just gives an explicit way back without needing it.
+@Composable
+private fun AllCircleScreen(
+    currentUserId: Long,
+    onBack: () -> Unit,
+    onAddToCircle: () -> Unit,
+    onGiftPerson: (FeedPersonResult) -> Unit,
+    onConnectPerson: (PendingConnectionTarget) -> Unit
+) {
+    var network by remember { mutableStateOf<List<FeedPersonResult>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
+    var loadFailed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentUserId) {
+        network = try {
+            RetrofitClient.friendApi.getNetwork(currentUserId)
+        } catch (e: Exception) {
+            loadFailed = true
+            emptyList()
+        }
+        loaded = true
+    }
+
+    val circleRow = network.filter { it.relationship == "DIRECT" || it.connectionRequestStatus != null }
+    val columns = 4
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "←",
+                fontSize = 20.sp,
+                color = TieyohNavy,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { onBack() }
+                    .padding(end = 12.dp)
+            )
+            Text(
+                text = "Your circle",
+                fontWeight = FontWeight.Bold,
+                color = TieyohNavy,
+                fontSize = 20.sp
+            )
+        }
+
+        when {
+            !loaded -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = TieyohAccent)
+                }
+            }
+            loadFailed -> {
+                Text(
+                    "Couldn't load your circle",
+                    color = TieyohMuted,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 24.dp)
+                )
+            }
+            else -> {
+                val rowCount = (circleRow.size + 1 + columns - 1) / columns
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    contentPadding = PaddingValues(top = 20.dp, bottom = 24.dp)
+                ) {
+                    items(rowCount) { rowIndex ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            for (col in 0 until columns) {
+                                val index = rowIndex * columns + col
+                                when {
+                                    index < circleRow.size -> {
+                                        val person = circleRow[index]
+                                        NetworkPersonChip(
+                                            person = person,
+                                            onClick = {
+                                                if (person.relationship == "DIRECT") {
+                                                    onGiftPerson(person)
+                                                } else {
+                                                    onConnectPerson(
+                                                        PendingConnectionTarget(
+                                                            userId = person.userId,
+                                                            displayName = person.displayName,
+                                                            tieyohId = person.tieyohId,
+                                                            profilePictureBase64 = person.profilePictureBase64,
+                                                            connectionRequestStatus = person.connectionRequestStatus
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
+                                    index == circleRow.size -> {
+                                        AddCircleChip(onClick = onAddToCircle)
+                                    }
+                                    else -> {
+                                        Spacer(modifier = Modifier.width(72.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// One person in the "Your circle" row -- a direct circle member (full
+// color, tap to gift) or someone with a connection request pending
+// between the viewer and them (dimmed, badge shows which direction;
+// tap reopens the confirm screen to see status or send/accept there).
+@Composable
+private fun NetworkPersonChip(person: FeedPersonResult, onClick: () -> Unit) {
+    val isDirect = person.relationship == "DIRECT"
+
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box {
+            NetworkAvatar(
+                profilePictureBase64 = person.profilePictureBase64,
+                displayName = person.displayName,
+                dimmed = !isDirect
+            )
+            if (!isDirect) {
+                val badge = when (person.connectionRequestStatus) {
+                    "PENDING_SENT" -> "⏳"
+                    "PENDING_RECEIVED" -> "❓"
+                    else -> "+"
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(if (badge == "+") TieyohAccent else Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = badge, fontSize = 11.sp, color = if (badge == "+") Color.White else TieyohNavy, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = person.displayName,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isDirect) TieyohNavy else TieyohMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+// The "+" chip at the end of the "Your circle" row -- same footprint as
+// NetworkPersonChip so it lines up in the LazyRow, but a dashed-outline
+// circle instead of an avatar. Reuses the same add-to-circle destination
+// as the top bar's own "+" icon (ContactsInviteScreen).
+@Composable
+private fun AddCircleChip(onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(TieyohBrandBlue.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Add",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy,
+            maxLines = 1,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun NetworkAvatar(profilePictureBase64: String?, displayName: String, dimmed: Boolean = false) {
+    val bitmap = remember(profilePictureBase64) {
+        profilePictureBase64?.let {
+            try {
+                val bytes = Base64.decode(it, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(TieyohAccent.copy(alpha = if (dimmed) 0.08f else 0.15f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "$displayName's profile picture",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
+        } else {
+            Text(
+                text = displayName.firstOrNull()?.uppercase() ?: "?",
+                color = if (dimmed) TieyohMuted else TieyohAccent,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun WishTargetCard(item: LegacyFeedItem.Wish) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(20.dp)
+    ) {
+        Text("${item.person} set a wish target", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+        Spacer(Modifier.height(4.dp))
+        Text("${item.merchant} · ${item.timeAgo}", fontSize = 14.sp, color = TieyohMuted)
         Spacer(Modifier.height(14.dp))
 
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("\$55", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
-            Text(" / \$100", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
+            Text("\$${item.current}", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+            Text(" / \$${item.goal}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
         }
         Spacer(Modifier.height(10.dp))
 
@@ -372,17 +2506,19 @@ private fun WishTargetCard() {
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.55f)
+                    .fillMaxWidth(
+                        if (item.goal > 0) (item.current.toFloat() / item.goal).coerceIn(0f, 1f) else 0f
+                    )
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(TieyohAccent)
+                    .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
             )
         }
     }
 }
 
 @Composable
-private fun SponsoredCard() {
+private fun SponsoredCard(item: LegacyFeedItem.Sponsored) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,12 +2543,12 @@ private fun SponsoredCard() {
                     .background(TieyohSponsoredLogoBg),
                 contentAlignment = Alignment.Center
             ) {
-                Text("BL", fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
+                Text(item.initials, fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
             }
             Spacer(Modifier.width(14.dp))
             Column {
-                Text("Blue Bottle Coffee", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
-                Text("20% off this week with Tieyoh", fontSize = 13.sp, color = TieyohSponsoredBody)
+                Text(item.merchant, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
+                Text(item.offer, fontSize = 13.sp, color = TieyohSponsoredBody)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -450,10 +2586,10 @@ private fun TransactionCard(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(TieyohTrack),
+                .background(Brush.linearGradient(listOf(TieyohBlue, TieyohTealGradient))),
             contentAlignment = Alignment.Center
         ) {
-            Text(initials, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TieyohNavy)
+            Text(initials, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
         }
         Spacer(Modifier.width(12.dp))
         Column {
@@ -529,7 +2665,7 @@ private fun MyListScreen() {
                             )
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(TieyohAccent)
+                            .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
                     )
                 }
             }
@@ -554,10 +2690,20 @@ private fun MyListScreen() {
 private fun MyCardScreen() {
 
     val allocations = listOf(
-        MerchantAllocation("Blue Bottle Coffee", 40.0),
-        MerchantAllocation("Whole Foods", 15.0)
+        MerchantAllocation("Blue Bottle Coffee", 40.0, isTieyohMerchant = true),
+        MerchantAllocation("Whole Foods", 15.0, isTieyohMerchant = true)
     )
-    val total = allocations.sumOf { it.amount }
+
+    var selectedMerchant by remember { mutableStateOf<MerchantAllocation?>(null) }
+
+    val activeSelection = selectedMerchant
+    if (activeSelection != null) {
+        MerchantPaymentScreen(
+            allocation = activeSelection,
+            onBack = { selectedMerchant = null }
+        )
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -567,33 +2713,10 @@ private fun MyCardScreen() {
         Text("My card", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
         Spacer(Modifier.height(6.dp))
         Text(
-            "One card for everything you've received. Funds stay grouped by merchant below until you spend them there — no separate gift card to juggle.",
+            "Funds stay grouped by merchant below until you spend them there — tap a merchant to pay.",
             color = TieyohMuted
         )
-        Spacer(Modifier.height(16.dp))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(TieyohNavy)
-                .padding(22.dp)
-        ) {
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = Color.White)) { append("tie") }
-                    withStyle(SpanStyle(color = Color(0xFF5EEAD4))) { append("yoh") }
-                },
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Spacer(Modifier.height(28.dp))
-            Text("Total balance", color = Color(0xFFB7D9D2), fontSize = 14.sp)
-            Spacer(Modifier.height(4.dp))
-            Text("\$${"%.2f".format(total)}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(20.dp))
         Text("Held by merchant", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 15.sp)
         Spacer(Modifier.height(10.dp))
 
@@ -604,13 +2727,79 @@ private fun MyCardScreen() {
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(TieyohCardBg)
+                        .clickable { selectedMerchant = allocation }
                         .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(allocation.merchant, color = TieyohNavy)
+                    Text(allocation.merchant, color = TieyohNavy, fontWeight = FontWeight.Bold)
                     Text("\$${"%.2f".format(allocation.amount)}", color = TieyohNavy, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+}
+
+// Shown when the user taps a merchant on "My card". Payment isn't wired up
+// yet — this is the entry point for the next round of changes (real card
+// charge vs. QR handoff to the merchant's own Tieyoh-registered terminal).
+@Composable
+private fun MerchantPaymentScreen(
+    allocation: MerchantAllocation,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { onBack() }
+        ) {
+            Text("←", fontSize = 20.sp, color = TieyohNavy, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(10.dp))
+            Text("Back", color = TieyohNavy, fontSize = 15.sp)
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            allocation.merchant,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "\$${"%.2f".format(allocation.amount)} available",
+            color = TieyohMuted,
+            fontSize = 15.sp
+        )
+
+        Spacer(Modifier.height(28.dp))
+        Text("How would you like to pay?", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 15.sp)
+        Spacer(Modifier.height(14.dp))
+
+        TieyohPrimaryButton(
+            text = "Pay with my Tieyoh card",
+            onClick = { /* card payment flow — coming soon */ }
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        if (allocation.isTieyohMerchant) {
+            TieyohSecondaryButton(
+                text = "Scan merchant QR code",
+                onClick = { /* QR scan flow — coming soon */ }
+            )
+        } else {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "QR payment isn't available — this merchant isn't registered with Tieyoh yet.",
+                color = TieyohMuted,
+                fontSize = 13.sp
+            )
         }
     }
 }
@@ -619,7 +2808,9 @@ private fun MyCardScreen() {
 private fun MerchantSearchScreen(
     title: String,
     subtitle: String,
-    actionLabel: String
+    actionLabel: String,
+    onMerchantSelected: ((MerchantDto) -> Unit)? = null,
+    onBack: () -> Unit = {}
 ) {
 
     var merchantName by remember { mutableStateOf("") }
@@ -647,7 +2838,22 @@ private fun MerchantSearchScreen(
             .padding(horizontal = 20.dp)
     ) {
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "←",
+                fontSize = 20.sp,
+                color = TieyohNavy,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .padding(vertical = 8.dp)
+                    .clickable { onBack() }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text = title,
@@ -706,7 +2912,8 @@ private fun MerchantSearchScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        Button(
+        TieyohPrimaryButton(
+            text = actionLabel,
             onClick = {
                 coroutineScope.launch {
                     isLoading = true
@@ -728,12 +2935,8 @@ private fun MerchantSearchScreen(
                         isLoading = false
                     }
                 }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = TieyohAccent),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(actionLabel)
-        }
+            }
+        )
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -818,6 +3021,7 @@ private fun MerchantSearchScreen(
                             selected = selectedMerchant?.id == merchant.id,
                             onSelect = {
                                 selectedMerchant = merchant
+                                onMerchantSelected?.invoke(merchant)
                             }
                         )
                     }
@@ -892,8 +3096,61 @@ private fun MerchantResultCard(
 @Composable
 private fun ProfileScreen(
     currentUser: AuthResponse,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onManagePaymentMethods: () -> Unit,
+    onEditProfile: () -> Unit,
+    onPrivacySettings: () -> Unit,
+    onViewQrCode: () -> Unit = {},
+    onProfileUpdated: (AuthResponse) -> Unit = {}
 ) {
+
+    val context = LocalContext.current
+    val profileCoroutineScope = rememberCoroutineScope()
+    var photoVersion by remember { mutableStateOf(0) }
+    // Prefer the just-picked local cache (instant, no network wait), but
+    // it's keyed by this account's id so switching accounts on the same
+    // device never shows a leftover cache from someone else -- see
+    // ProfilePhotoStore. Falling back to currentUser.profilePictureBase64
+    // (the backend's per-account copy) covers a user who has a photo set
+    // from another device but hasn't picked one on this device yet.
+    val photoBitmap = remember(photoVersion, currentUser.id, currentUser.profilePictureBase64) {
+        ProfilePhotoStore.load(context, currentUser.id)
+            ?: currentUser.profilePictureBase64?.let { decodeBase64ToBitmap(it) }
+    }
+
+    // Auto-accept circle invites (and the newer "share gifting with your
+    // circle" setting) now live in Edit Profile's Privacy section instead
+    // of here -- see EditProfileScreen -- so this screen no longer needs
+    // to hold that toggle's state itself.
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            if (ProfilePhotoStore.save(context, currentUser.id, uri)) {
+                photoVersion++
+                // Sync it to the server too, in the background, so this
+                // picture shows up for other people (e.g. in the invite
+                // search results) -- not just on this device.
+                profileCoroutineScope.launch {
+                    try {
+                        val bytes = ProfilePhotoStore.readBytes(context, currentUser.id)
+                        if (bytes != null) {
+                            val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                            val updated = RetrofitClient.userApi.updateProfilePicture(
+                                userId = currentUser.id,
+                                request = ProfilePictureRequest(imageBase64 = encoded)
+                            )
+                            onProfileUpdated(updated)
+                        }
+                    } catch (e: Exception) {
+                        // Best-effort sync -- the picture still shows locally
+                        // even if this fails, so just skip it.
+                    }
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -918,24 +3175,89 @@ private fun ProfileScreen(
                 .padding(18.dp)
         ) {
             Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .clickable { photoPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (photoBitmap != null) {
+                            Image(
+                                bitmap = photoBitmap.asImageBitmap(),
+                                contentDescription = "Profile picture",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        } else {
+                            Text(
+                                text = currentUser.displayName.firstOrNull()?.uppercase() ?: "?",
+                                color = TieyohAccent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 26.sp
+                            )
+                        }
+
+                        // Small camera badge signaling the avatar is tappable.
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(TieyohNavy),
+                            contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "\uD83D\uDCF7", fontSize = 11.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
                 Text(
                     text = currentUser.displayName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = TieyohNavy
                 )
+            }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                currentUser.tieyohId?.let { tieyohId ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = tieyohId,
+                                color = TieyohAccent,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Scan to add me",
+                                color = TieyohMuted,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        val qrBitmap = remember(tieyohId) { QrCodeGenerator.generate(tieyohId) }
+                        qrBitmap?.let { bitmap ->
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "QR code for $tieyohId",
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clickable { onViewQrCode() }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
 
                 Text(
                     text = currentUser.email,
-                    color = TieyohMuted
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "Friends, payment settings, and preferences will be added here.",
                     color = TieyohMuted
                 )
             }
@@ -943,11 +3265,82 @@ private fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedButton(
-            onClick = onLogout,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(TieyohCardBg)
+                .clickable(onClick = onEditProfile)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Log out")
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Edit profile", fontWeight = FontWeight.Bold, color = TieyohNavy)
+                Text(
+                    text = "Email, phone, address, birthday, and holidays",
+                    color = TieyohMuted,
+                    fontSize = 13.sp
+                )
+            }
+            Text(text = "Edit", color = TieyohAccent, fontWeight = FontWeight.Bold)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(TieyohCardBg)
+                .clickable(onClick = onPrivacySettings)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Privacy", fontWeight = FontWeight.Bold, color = TieyohNavy)
+                Text(
+                    text = "Auto-accept circle invites, share gifting with your circle",
+                    color = TieyohMuted,
+                    fontSize = 13.sp
+                )
+            }
+            Text(text = "Edit", color = TieyohAccent, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val savedPaymentMethods = remember { PaymentMethodStore.load(context) }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(TieyohCardBg)
+                .clickable(onClick = onManagePaymentMethods)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Payment methods", fontWeight = FontWeight.Bold, color = TieyohNavy)
+                Text(
+                    text = if (savedPaymentMethods.isEmpty()) {
+                        "None added yet"
+                    } else {
+                        savedPaymentMethods.joinToString { "${it.label} •••• ${it.last4}" }
+                    },
+                    color = TieyohMuted,
+                    fontSize = 13.sp
+                )
+            }
+            Text(
+                text = if (savedPaymentMethods.isEmpty()) "Add" else "Edit",
+                color = TieyohAccent,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        TieyohSecondaryButton(text = "Log out", onClick = onLogout)
     }
 }
