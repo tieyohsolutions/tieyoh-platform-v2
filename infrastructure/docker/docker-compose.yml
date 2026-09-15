@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: tieyoh-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: tieyoh
+      POSTGRES_USER: tieyoh
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - tieyoh_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tieyoh -d tieyoh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tieyoh_postgres_data:
