@@ -103,11 +103,33 @@ public class OutscraperExcelReader {
                         getDecimal(row, columns, "longitude")
                 );
 
+                record.setStatus(
+                        mapBusinessStatus(
+                                getString(row, columns, "business_status")
+                        )
+                );
+
                 records.add(record);
             }
         }
 
         return records;
+    }
+
+    private String mapBusinessStatus(String businessStatus) {
+
+        if (businessStatus == null) {
+            return "ACTIVE";
+        }
+
+        if ("OPERATIONAL".equalsIgnoreCase(businessStatus)) {
+            return "ACTIVE";
+        }
+
+        // CLOSED_PERMANENTLY, CLOSED_TEMPORARILY, or anything else
+        // unrecognized -- keep the row but mark it inactive rather
+        // than silently dropping it or importing it as active.
+        return "INACTIVE";
     }
 
     private Map<String, Integer> buildColumnMap(Row headerRow) {

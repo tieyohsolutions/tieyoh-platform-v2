@@ -67,7 +67,11 @@ public class MerchantImportService {
         merchant.setCategory(record.getCategory());
         merchant.setSource(record.getSource());
         merchant.setSourceMerchantId(record.getSourceMerchantId());
-        merchant.setStatus("ACTIVE");
+        merchant.setStatus(
+                record.getStatus() != null
+                        ? record.getStatus()
+                        : "ACTIVE"
+        );
 
         Merchant savedMerchant =
                 merchantService.saveMerchant(merchant);
