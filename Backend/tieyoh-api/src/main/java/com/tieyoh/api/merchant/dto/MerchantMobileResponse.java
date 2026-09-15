@@ -1,5 +1,7 @@
 package com.tieyoh.api.merchant.dto;
 
+import java.math.BigDecimal;
+
 public class MerchantMobileResponse {
 
     private Long id;
@@ -9,6 +11,10 @@ public class MerchantMobileResponse {
     private String logoUrl;
     private String category;
     private String status;
+    // Both null/zero unless this response is backing "My picks" -- Send
+    // Gift's favorite-places use of this same DTO just ignores them.
+    private BigDecimal targetAmount;
+    private BigDecimal amountReceived;
 
     public Long getId() {
         return id;
@@ -64,5 +70,21 @@ public class MerchantMobileResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public BigDecimal getTargetAmount() {
+        return targetAmount;
+    }
+
+    public void setTargetAmount(BigDecimal targetAmount) {
+        this.targetAmount = targetAmount;
+    }
+
+    public BigDecimal getAmountReceived() {
+        return amountReceived;
+    }
+
+    public void setAmountReceived(BigDecimal amountReceived) {
+        this.amountReceived = amountReceived;
     }
 }

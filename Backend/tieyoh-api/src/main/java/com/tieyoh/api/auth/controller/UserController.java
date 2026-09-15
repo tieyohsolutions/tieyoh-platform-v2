@@ -2,6 +2,7 @@ package com.tieyoh.api.auth.controller;
 
 import com.tieyoh.api.auth.dto.AuthResponse;
 import com.tieyoh.api.auth.dto.MerchantSelectionRequest;
+import com.tieyoh.api.auth.dto.MerchantTargetRequest;
 import com.tieyoh.api.auth.dto.ProfilePictureRequest;
 import com.tieyoh.api.auth.dto.ProfileSetupRequest;
 import com.tieyoh.api.auth.dto.UserProfileResponse;
@@ -56,6 +57,30 @@ public class UserController {
     @GetMapping("/{id}/merchants")
     public List<MerchantMobileResponse> getMerchantSelections(@PathVariable Long id) {
         return userProfileService.getMerchantSelections(id);
+    }
+
+    // Backs "Add a merchant to your list" on My picks -- additive, unlike
+    // the full-replace POST /{id}/merchants above. Body is optional; a
+    // merchant can be added with no target and one set later via the
+    // /target endpoint below.
+    @PostMapping("/{id}/merchants/{merchantId}")
+    public void addMerchantToList(
+            @PathVariable Long id,
+            @PathVariable Long merchantId,
+            @RequestBody(required = false) MerchantTargetRequest request) {
+        userProfileService.addMerchantToList(
+                id,
+                merchantId,
+                request == null ? null : request.getTargetAmount());
+    }
+
+    // Backs "Set target" / "Edit target" on an existing My picks entry.
+    @PatchMapping("/{id}/merchants/{merchantId}/target")
+    public void updateMerchantTarget(
+            @PathVariable Long id,
+            @PathVariable Long merchantId,
+            @RequestBody MerchantTargetRequest request) {
+        userProfileService.updateMerchantTarget(id, merchantId, request.getTargetAmount());
     }
 
     @PatchMapping("/{id}/profile-picture")

@@ -10,6 +10,7 @@ import com.tieyoh.api.auth.entity.UserMerchantList;
 import com.tieyoh.api.auth.repository.AppUserRepository;
 import com.tieyoh.api.auth.repository.UserMerchantListRepository;
 import com.tieyoh.api.auth.service.FriendService;
+import com.tieyoh.api.gift.repository.GiftRepository;
 import com.tieyoh.api.merchant.dto.MerchantMobileResponse;
 import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.repository.MerchantRepository;
@@ -18,29 +19,32 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
 public class UserProfileService {
 
-    private static final int MAX_MERCHANT_LIST_SIZE = 10;
-
     private final AppUserRepository appUserRepository;
     private final UserMerchantListRepository userMerchantListRepository;
     private final MerchantRepository merchantRepository;
     private final FriendService friendService;
+    private final GiftRepository giftRepository;
 
     public UserProfileService(
             AppUserRepository appUserRepository,
             UserMerchantListRepository userMerchantListRepository,
             MerchantRepository merchantRepository,
-            FriendService friendService) {
+            FriendService friendService,
+            GiftRepository giftRepository) {
         this.appUserRepository = appUserRepository;
         this.userMerchantListRepository = userMerchantListRepository;
         this.merchantRepository = merchantRepository;
         this.friendService = friendService;
+        this.giftRepository = giftRepository;
     }
 
     public boolean isTieyohIdAvailable(String rawId) {
@@ -174,15 +178,13 @@ public class UserProfileService {
                 saved.getProfilePictureBase64(), saved.getAutoAcceptCircleInvites());
     }
 
+    // Full replace -- used by onboarding's "What places make you happy?"
+    // step, which always submits the complete set it wants. NOT used by
+    // "Add a merchant" from My picks, since that must be additive and
+    // must not disturb targets already set on existing picks -- see
+    // addMerchantToList below. Open-ended: no cap on list size.
     public void saveMerchantSelections(Long userId, List<Long> merchantIds) {
         List<Long> ids = merchantIds == null ? List.of() : merchantIds;
-
-        if (ids.size() > MAX_MERCHANT_LIST_SIZE) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "You can select up to " + MAX_MERCHANT_LIST_SIZE + " merchants"
-            );
-        }
 
         AppUser user = appUserRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
@@ -200,20 +202,72 @@ public class UserProfileService {
         }
     }
 
-    // Backs the Send Gift flow's "their favorite places" step -- the
-    // recipient's own saved wish-list merchants, same shape as the mobile
-    // merchant-search results so the client can reuse one card/tile
-    // component for both. Empty list (not an error) if they haven't
-    // picked any yet.
+    // Backs "Add a merchant" from My picks -- additive, unlike
+    // saveMerchantSelections above. Adding a merchant that's already on
+    // the list is a no-op on membership (no duplicate row) but still
+    // lets a target be attached if one wasn't set before. A user can
+    // pick a merchant with no target here, or set one in the same step;
+    // either way it never touches any other pick already on the list.
+    public void addMerchantToList(Long userId, Long merchantId, BigDecimal targetAmount) {
+        AppUser user = appUserRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        Merchant merchant = merchantRepository.findById(merchantId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Merchant not found: " + merchantId));
+
+        UserMerchantList entry = userMerchantListRepository
+                .findByUserIdAndMerchantId(userId, merchantId)
+                .orElseGet(() -> {
+                    UserMerchantList created = new UserMerchantList();
+                    created.setUser(user);
+                    created.setMerchant(merchant);
+                    return created;
+                });
+
+        if (targetAmount != null) {
+            entry.setTargetAmount(targetAmount);
+        }
+
+        userMerchantListRepository.save(entry);
+    }
+
+    // Backs the "Set target" / "Edit target" action on an existing pick.
+    // 404s if the merchant isn't actually on this user's list rather than
+    // silently creating one -- that path is addMerchantToList's job.
+    // Passing a null targetAmount clears a previously-set target.
+    public void updateMerchantTarget(Long userId, Long merchantId, BigDecimal targetAmount) {
+        UserMerchantList entry = userMerchantListRepository
+                .findByUserIdAndMerchantId(userId, merchantId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "That merchant isn't on this user's list"));
+
+        entry.setTargetAmount(targetAmount);
+        userMerchantListRepository.save(entry);
+    }
+
+    // Backs the Send Gift flow's "their favorite places" step AND "My
+    // picks" -- same shape for both, with targetAmount/amountReceived
+    // simply unused by the Send Gift screen. Empty list (not an error)
+    // if they haven't picked any yet. amountReceived is derived live from
+    // completed Gift rows, not a stored running total.
     public List<MerchantMobileResponse> getMerchantSelections(Long userId) {
-        return userMerchantListRepository.findByUserId(userId)
+        List<UserMerchantList> entries = userMerchantListRepository.findByUserId(userId);
+
+        Map<Long, BigDecimal> receivedByMerchant = giftRepository
+                .sumReceivedByRecipientGroupedByMerchant(userId)
                 .stream()
-                .map(UserMerchantList::getMerchant)
-                .map(this::toMobileResponse)
+                .collect(Collectors.toMap(
+                        GiftRepository.MerchantReceivedTotal::getMerchantId,
+                        GiftRepository.MerchantReceivedTotal::getTotal
+                ));
+
+        return entries.stream()
+                .map(entry -> toMobileResponse(entry, receivedByMerchant.get(entry.getMerchant().getId())))
                 .collect(Collectors.toList());
     }
 
-    private MerchantMobileResponse toMobileResponse(Merchant merchant) {
+    private MerchantMobileResponse toMobileResponse(UserMerchantList entry, BigDecimal amountReceived) {
+        Merchant merchant = entry.getMerchant();
         MerchantMobileResponse response = new MerchantMobileResponse();
         response.setId(merchant.getId());
         response.setTmid(merchant.getTmid());
@@ -224,6 +278,8 @@ public class UserProfileService {
         if (merchant.getParentMerchant() != null) {
             response.setPmid(merchant.getParentMerchant().getPmid());
         }
+        response.setTargetAmount(entry.getTargetAmount());
+        response.setAmountReceived(amountReceived == null ? BigDecimal.ZERO : amountReceived);
         return response;
     }
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -50,6 +51,12 @@ import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -993,7 +1000,7 @@ fun TieyohApp(
                     )
                 }
 
-                TieyohScreen.MY_LIST -> MyListScreen()
+                TieyohScreen.MY_LIST -> MyListScreen(currentUser = currentUser)
 
                 TieyohScreen.MY_CARD -> MyCardScreen()
 
@@ -2612,14 +2619,55 @@ private fun TransactionCard(
     }
 }
 
-@Composable
-private fun MyListScreen() {
+private enum class PicksSortOption(val label: String) {
+    NAME("Name (A-Z)"),
+    TARGET("Highest target"),
+    RECEIVED("Highest received")
+}
 
-    val wishTargets = listOf(
-        WishTarget("Blue Bottle Coffee", 55, 100),
-        WishTarget("Whole Foods", 20, 50),
-        WishTarget("AMC Theatres", 0, 40)
-    )
+private fun formatPickAmount(value: Double): String {
+    return if (value == value.toLong().toDouble()) {
+        value.toLong().toString()
+    } else {
+        String.format("%.2f", value)
+    }
+}
+
+@Composable
+private fun MyListScreen(currentUser: AuthResponse) {
+
+    var picks by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var sortOption by remember { mutableStateOf(PicksSortOption.NAME) }
+    var showAddSheet by remember { mutableStateOf(false) }
+    var editingTarget by remember { mutableStateOf<MerchantDto?>(null) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    suspend fun reload() {
+        try {
+            picks = RetrofitClient.userApi.getMerchantSelections(currentUser.id)
+            loadError = null
+        } catch (e: Exception) {
+            loadError = "Couldn't load your picks right now."
+        } finally {
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(currentUser.id) {
+        isLoading = true
+        reload()
+    }
+
+    val sortedPicks = remember(picks, sortOption) {
+        when (sortOption) {
+            PicksSortOption.NAME -> picks.sortedBy { it.brandName.lowercase() }
+            PicksSortOption.TARGET -> picks.sortedByDescending { it.targetAmount ?: -1.0 }
+            PicksSortOption.RECEIVED -> picks.sortedByDescending { it.amountReceived ?: 0.0 }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2636,53 +2684,476 @@ private fun MyListScreen() {
                 "Merchants you'd love a gift from. Set a wish target and your circle can chip in toward it — no payment method needed to set one.",
                 color = TieyohMuted
             )
-        }
-
-        items(wishTargets) { target ->
-            Column(
+            Spacer(Modifier.height(16.dp))
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(TieyohCardBg)
-                    .padding(18.dp)
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
+                    .clickable { showAddSheet = true },
+                contentAlignment = Alignment.Center
             ) {
-                Text(target.merchant, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("\$${target.current}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
-                    Text(" / \$${target.goal}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
-                }
-                Spacer(Modifier.height(8.dp))
+                Text("+ Add a merchant to your list", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            }
+        }
+
+        when {
+            isLoading -> item {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(TieyohTrack)
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(
-                                if (target.goal > 0) (target.current.toFloat() / target.goal).coerceIn(0f, 1f) else 0f
-                            )
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
+                    CircularProgressIndicator(color = TieyohAccent)
+                }
+            }
+
+            loadError != null -> item {
+                Text(loadError.orEmpty(), color = TieyohGiftRed, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
+
+            picks.isEmpty() -> item {
+                Text(
+                    "You haven't added any picks yet. Tap \"Add a merchant\" above to get started.",
+                    color = TieyohMuted,
+                    fontSize = 14.sp
+                )
+            }
+
+            else -> {
+                item {
+                    Column {
+                        Text("Sort by", fontSize = 12.sp, color = TieyohMuted, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PicksSortOption.values().forEach { option ->
+                                val isActive = option == sortOption
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isActive) TieyohAccent else Color.Transparent)
+                                        .border(1.dp, TieyohAccent, RoundedCornerShape(12.dp))
+                                        .clickable { sortOption = option }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        option.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isActive) Color.White else TieyohAccent
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(sortedPicks, key = { it.id }) { pick ->
+                    MerchantPickCard(
+                        pick = pick,
+                        onEditTarget = { editingTarget = pick }
                     )
                 }
             }
         }
+    }
 
-        item {
+    if (showAddSheet) {
+        AddMerchantSheet(
+            currentUser = currentUser,
+            existingIds = picks.map { it.id }.toSet(),
+            onDismiss = { showAddSheet = false },
+            onAdded = {
+                showAddSheet = false
+                coroutineScope.launch { reload() }
+            }
+        )
+    }
+
+    editingTarget?.let { pick ->
+        TargetEditDialog(
+            merchantName = pick.brandName,
+            currentTarget = pick.targetAmount,
+            onDismiss = { editingTarget = null },
+            onSave = { newTarget ->
+                coroutineScope.launch {
+                    try {
+                        RetrofitClient.userApi.updateMerchantTarget(
+                            userId = currentUser.id,
+                            merchantId = pick.id,
+                            request = MerchantTargetRequest(targetAmount = newTarget)
+                        )
+                        editingTarget = null
+                        reload()
+                    } catch (e: Exception) {
+                        // Leave the dialog open with what they typed rather
+                        // than silently discarding it -- no toast/error
+                        // surface wired up here yet.
+                    }
+                }
+            }
+        )
+    }
+}
+
+// One pick's card -- shows real progress (amountReceived, derived from
+// completed gifts) against the target once one is set, or an invitation
+// to set one when it isn't. The pill in the top-right is the only
+// difference between those two states: "Edit target" (outline) vs.
+// "Set target" (filled), both opening the same TargetEditDialog.
+@Composable
+private fun MerchantPickCard(pick: MerchantDto, onEditTarget: () -> Unit) {
+    val target = pick.targetAmount
+    val hasTarget = target != null && target > 0
+    val received = pick.amountReceived ?: 0.0
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(pick.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
+                pick.category?.let {
+                    Text(it, fontSize = 12.sp, color = TieyohMuted)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(15.dp))
+                    .then(
+                        if (hasTarget) {
+                            Modifier.border(1.5.dp, TieyohAccent, RoundedCornerShape(15.dp))
+                        } else {
+                            Modifier.background(TieyohAccent)
+                        }
+                    )
+                    .clickable { onEditTarget() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    if (hasTarget) "✎ Edit target" else "+ Set target",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasTarget) TieyohAccent else Color.White
+                )
+            }
+        }
+
+        if (hasTarget && target != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("\$${formatPickAmount(received)}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                Text(" / \$${formatPickAmount(target)}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
+            }
+            Spacer(Modifier.height(8.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.5.dp, TieyohAccent, RoundedCornerShape(14.dp))
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(TieyohTrack)
             ) {
-                Text("+ Add a merchant to your list", color = TieyohAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(
+                            if (target > 0) (received / target).toFloat().coerceIn(0f, 1f) else 0f
+                        )
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
+                )
+            }
+        } else {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "No wish target set yet — tap \"Set target\" to add one anytime.",
+                fontSize = 13.sp,
+                color = TieyohMuted
+            )
+        }
+    }
+}
+
+// Shared by "Set target" (currentTarget == null) and "Edit target"
+// (currentTarget != null) -- same dialog, the title and starting value
+// are the only difference.
+@Composable
+private fun TargetEditDialog(
+    merchantName: String,
+    currentTarget: Double?,
+    onDismiss: () -> Unit,
+    onSave: (Double?) -> Unit
+) {
+    var amountText by remember {
+        mutableStateOf(currentTarget?.let { formatPickAmount(it) } ?: "")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (currentTarget != null) "Edit target" else "Set target",
+                fontWeight = FontWeight.Bold,
+                color = TieyohNavy
+            )
+        },
+        text = {
+            Column {
+                Text(merchantName, color = TieyohMuted, fontSize = 13.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { input -> amountText = input.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Wish target") },
+                    prefix = { Text("$") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(amountText.toDoubleOrNull()) }) {
+                Text("Save", color = TieyohAccent, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TieyohMuted)
+            }
+        }
+    )
+}
+
+// The "Add a merchant to your list" flow from My picks -- a single search
+// + select step, same real search MerchantSelectionScreen uses, but
+// additive (RetrofitClient.userApi.addMerchantToList) so it never touches
+// any other pick already on the list. A wish target is optional here: it
+// can be set in this same step, or skipped and added later from the
+// "Set target" pill on the new card.
+@Composable
+private fun AddMerchantSheet(
+    currentUser: AuthResponse,
+    existingIds: Set<Long>,
+    onDismiss: () -> Unit,
+    onAdded: () -> Unit
+) {
+    var searchText by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<MerchantDto?>(null) }
+    var targetText by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    fun search() {
+        if (searchText.isBlank()) return
+        coroutineScope.launch {
+            isSearching = true
+            hasSearched = true
+            errorMessage = null
+            try {
+                results = RetrofitClient.merchantApi.searchMerchants(name = searchText.trim())
+            } catch (e: Exception) {
+                results = emptyList()
+                errorMessage = "Unable to search places right now."
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
+    fun save() {
+        val merchant = selected ?: return
+        coroutineScope.launch {
+            isSaving = true
+            errorMessage = null
+            try {
+                RetrofitClient.userApi.addMerchantToList(
+                    userId = currentUser.id,
+                    merchantId = merchant.id,
+                    request = MerchantTargetRequest(targetAmount = targetText.toDoubleOrNull())
+                )
+                onAdded()
+            } catch (e: Exception) {
+                errorMessage = "Couldn't add that merchant right now."
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.85f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White)
+                .padding(20.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Add a merchant",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = TieyohNavy
+                    )
+                    Text(
+                        "Close",
+                        color = TieyohAccent,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                OutlinedTextField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                    placeholder = { Text("Search for a place...") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { search() }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(TieyohAccent)
+                        .clickable { search() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Search", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                when {
+                    isSearching -> Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = TieyohAccent)
+                    }
+
+                    hasSearched && results.isEmpty() -> Text(
+                        "No places found -- try a different search.",
+                        color = TieyohMuted,
+                        fontSize = 13.sp
+                    )
+
+                    else -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(results, key = { it.id }) { merchant ->
+                            val alreadyAdded = merchant.id in existingIds
+                            val isSelected = selected?.id == merchant.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (isSelected) TieyohAccent.copy(alpha = 0.10f) else Color.White)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) TieyohAccent else TieyohMuted.copy(alpha = 0.25f),
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable(enabled = !alreadyAdded) { selected = merchant }
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                                    merchant.category?.let { Text(it, fontSize = 12.sp, color = TieyohMuted) }
+                                }
+                                when {
+                                    alreadyAdded -> Text("Already on your list", fontSize = 11.sp, color = TieyohMuted)
+                                    isSelected -> Text("Selected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TieyohAccent)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                selected?.let { merchant ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Set a wish target for ${merchant.brandName}? (optional)",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TieyohNavy
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = targetText,
+                        onValueChange = { input -> targetText = input.filter { it.isDigit() || it == '.' } },
+                        placeholder = { Text("Add now, or skip and set it later") },
+                        prefix = { Text("$") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                errorMessage?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = TieyohGiftRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
+                        .background(
+                            if (selected != null && !isSaving) {
+                                Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient))
+                            } else {
+                                Brush.horizontalGradient(listOf(TieyohMuted.copy(alpha = 0.35f), TieyohMuted.copy(alpha = 0.35f)))
+                            }
+                        )
+                        .clickable(enabled = selected != null && !isSaving) { save() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                    } else {
+                        Text("Add to my picks", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    }
+                }
             }
         }
     }
