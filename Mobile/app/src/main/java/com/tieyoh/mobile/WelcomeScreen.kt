@@ -83,17 +83,18 @@ fun WelcomeScreen(
             Spacer(Modifier.weight(1f))
 
             // fillMaxWidth() alone rendered this at close to its raw
-            // intrinsic pixel size in practice (the PNG is 273x219) --
-            // pinning height to width via aspectRatio forces Compose to
-            // actually scale it up to the available width instead, which
-            // is what "bigger, more impact" needs here.
+            // intrinsic pixel size in practice -- pinning height to width
+            // via aspectRatio forces Compose to actually scale it up to
+            // the available width instead, which is what "bigger, more
+            // impact" needs here. Ratio matches gift_box.png's actual
+            // pixel dimensions (1035x675) so FillBounds doesn't distort it.
             Image(
                 painter = painterResource(id = R.drawable.gift_box),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(273f / 219f)
+                    .aspectRatio(1035f / 675f)
             )
 
             Spacer(Modifier.weight(1f))
