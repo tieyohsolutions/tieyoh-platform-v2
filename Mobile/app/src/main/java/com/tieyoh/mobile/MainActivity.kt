@@ -25,7 +25,19 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TieyohTheme {
-                TieyohApp()
+                var showWelcome by remember { mutableStateOf(true) }
+
+                if (showWelcome) {
+                    // TODO: replace with the real signup/login flow (GetStartedScreen, LoginScreen,
+                    // etc.) once those are rebuilt -- for now both actions just drop into the
+                    // existing dashboard prototype.
+                    WelcomeScreen(
+                        onCreateAccount = { showWelcome = false },
+                        onLogIn = { showWelcome = false }
+                    )
+                } else {
+                    TieyohApp()
+                }
             }
         }
     }
