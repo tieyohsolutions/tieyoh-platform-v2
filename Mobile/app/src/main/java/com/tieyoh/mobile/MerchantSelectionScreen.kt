@@ -50,7 +50,6 @@ import com.tieyoh.mobile.ui.theme.TieyohGiftRed
 import com.tieyoh.mobile.ui.theme.TieyohMuted
 import kotlinx.coroutines.launch
 
-private const val MAX_MERCHANTS = 10
 
 // Formerly "Add merchants to your list" -- renamed and restyled to match
 // the "What places make you happy?" reference image: fonts, colors, and
@@ -117,13 +116,10 @@ fun MerchantSelectionScreen(
     }
 
     fun toggle(merchant: MerchantDto) {
+        // Open-ended for now -- no cap on how many merchants can be selected.
         selected = if (selected.any { it.id == merchant.id }) {
             selected.filterNot { it.id == merchant.id }
         } else {
-            if (selected.size >= MAX_MERCHANTS) {
-                errorMessage = "You can select up to $MAX_MERCHANTS places."
-                return
-            }
             selected + merchant
         }
     }
@@ -323,7 +319,7 @@ fun MerchantSelectionScreen(
                         color = TieyohMuted
                     )
                     Text(
-                        text = "${selected.size}/$MAX_MERCHANTS selected",
+                        text = "${selected.size} selected",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = TieyohBrandNavy
