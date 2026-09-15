@@ -82,7 +82,7 @@ fun WelcomeScreen(
         ) {
             Spacer(Modifier.weight(1f))
 
-            // Sized to 65% of the available width (down from full width)
+            // Sized to 75% of the available width (down from full width)
             // per user feedback that the hero image read too large -- still
             // centered by the parent Column's horizontalAlignment. Ratio
             // matches gift_box.png's actual pixel dimensions (1035x675) so
@@ -92,7 +92,7 @@ fun WelcomeScreen(
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
-                    .fillMaxWidth(0.65f)
+                    .fillMaxWidth(0.75f)
                     .aspectRatio(1035f / 675f)
             )
 
