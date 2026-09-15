@@ -21,14 +21,48 @@ interface MerchantApi {
 
 object RetrofitClient {
 
-    private const val BASE_URL =
-        "http://192.168.68.78:8080/"
+    private const val BASE_URL = "http://10.0.2.2:8080/"
 
-    val merchantApi: MerchantApi by lazy {
+    private val retrofit: Retrofit by lazy {
         Retrofit.Builder()
             .baseUrl(BASE_URL)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(MerchantApi::class.java)
+    }
+
+    val merchantApi: MerchantApi by lazy {
+        retrofit.create(MerchantApi::class.java)
+    }
+
+    val authApi: AuthApi by lazy {
+        retrofit.create(AuthApi::class.java)
+    }
+
+    val userApi: UserApi by lazy {
+        retrofit.create(UserApi::class.java)
+    }
+
+    val friendApi: FriendApi by lazy {
+        retrofit.create(FriendApi::class.java)
+    }
+
+    val connectionRequestApi: ConnectionRequestApi by lazy {
+        retrofit.create(ConnectionRequestApi::class.java)
+    }
+
+    val notificationApi: NotificationApi by lazy {
+        retrofit.create(NotificationApi::class.java)
+    }
+
+    val invitationApi: InvitationApi by lazy {
+        retrofit.create(InvitationApi::class.java)
+    }
+
+    val feedApi: FeedApi by lazy {
+        retrofit.create(FeedApi::class.java)
+    }
+
+    val giftApi: GiftApi by lazy {
+        retrofit.create(GiftApi::class.java)
     }
 }

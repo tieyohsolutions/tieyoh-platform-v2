@@ -1,0 +1,14 @@
+-- User-reported gap: the original Block 1 spec's "Optional: holidays
+-- celebrated" field was never actually built anywhere -- not at signup,
+-- not editable later. This is deliberately a separate concept from
+-- holiday_definition (V19): that table is the Feed's general
+-- market/calendar occasions (Christmas, Halloween, etc., not tied to any
+-- one person), while this column is a user's own explicit, self-reported
+-- set of holidays they personally celebrate -- exactly the kind of
+-- "explicit preference/setting" the Interactive Feed spec said would be
+-- needed before ever personalizing a culturally/religiously specific
+-- holiday to a given user. Stored as a simple comma-separated list of
+-- labels chosen from a fixed picklist in the app (see HolidayOptions.kt on
+-- the mobile side) -- a full join table would be over-engineering for a
+-- small, bounded, purely self-descriptive set of checkboxes.
+ALTER TABLE app_user ADD COLUMN holidays_celebrated VARCHAR(500);
