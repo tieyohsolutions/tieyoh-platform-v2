@@ -3,6 +3,8 @@ package com.tieyoh.mobile
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -93,6 +95,7 @@ fun ConfirmConnectionScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
         Row(
@@ -108,7 +111,9 @@ fun ConfirmConnectionScreen(
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        // Fixed, not weight(1f) -- this Column scrolls now (see the
+        // header note above), and weight() needs a bounded parent.
+        Spacer(modifier = Modifier.height(40.dp))
 
         Box(
             modifier = Modifier
@@ -183,7 +188,7 @@ fun ConfirmConnectionScreen(
             )
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(40.dp))
 
         if (showSend) {
             // Standardized button styling (app-wide pill shape/size/colors)

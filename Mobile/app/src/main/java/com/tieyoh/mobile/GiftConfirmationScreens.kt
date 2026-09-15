@@ -4,6 +4,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -155,6 +157,7 @@ private fun GiftConfirmationScaffold(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp)
             .padding(top = 12.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -263,7 +266,10 @@ private fun GiftConfirmationScaffold(
             Text(partyName, color = TieyohNavy, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        // A fixed spacer, not weight(1f) -- this Column is scrollable now
+        // (see the header note above this function), and weight() requires a
+        // bounded parent, which verticalScroll's Column isn't.
+        Spacer(Modifier.height(28.dp))
 
         TieyohPrimaryButton(
             text = primaryLabel,
