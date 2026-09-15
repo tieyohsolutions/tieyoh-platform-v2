@@ -1433,7 +1433,7 @@ private fun TieyohBottomBar(
                 currentScreen = currentScreen,
                 onNavigate = onNavigate,
                 glyph = "☰",
-                label = "My list"
+                label = "My picks"
             )
 
             TieyohNavItem(
@@ -2630,7 +2630,7 @@ private fun MyListScreen() {
     ) {
 
         item {
-            Text("My list", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
+            Text("My picks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
             Spacer(Modifier.height(6.dp))
             Text(
                 "Up to 10 merchants you'd love a gift from. Set a wish target and your circle can chip in toward it — no payment method needed to set one.",
