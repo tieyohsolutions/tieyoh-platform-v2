@@ -82,18 +82,17 @@ fun WelcomeScreen(
         ) {
             Spacer(Modifier.weight(1f))
 
-            // fillMaxWidth() alone rendered this at close to its raw
-            // intrinsic pixel size in practice -- pinning height to width
-            // via aspectRatio forces Compose to actually scale it up to
-            // the available width instead, which is what "bigger, more
-            // impact" needs here. Ratio matches gift_box.png's actual
-            // pixel dimensions (1035x675) so FillBounds doesn't distort it.
+            // Sized to 65% of the available width (down from full width)
+            // per user feedback that the hero image read too large -- still
+            // centered by the parent Column's horizontalAlignment. Ratio
+            // matches gift_box.png's actual pixel dimensions (1035x675) so
+            // FillBounds doesn't distort it.
             Image(
                 painter = painterResource(id = R.drawable.gift_box),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(0.65f)
                     .aspectRatio(1035f / 675f)
             )
 
