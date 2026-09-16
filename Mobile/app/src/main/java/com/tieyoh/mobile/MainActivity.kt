@@ -3,6 +3,8 @@ package com.tieyoh.mobile
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.provider.Settings
 import android.util.Log as AndroidLog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -2972,8 +2974,15 @@ private fun AddMerchantSheet(
     var targetText by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var locationServicesDisabled by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
+
+    fun isLocationEnabled(): Boolean {
+        val locationManager = context.getSystemService(LocationManager::class.java)
+        return locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
+                locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+    }
 
     fun switchMode(mode: MerchantSearchMode) {
         if (searchMode == mode) return
@@ -2983,6 +2992,7 @@ private fun AddMerchantSheet(
         hasSearched = false
         selected = null
         errorMessage = null
+        locationServicesDisabled = false
     }
 
     fun search() {
@@ -3006,6 +3016,21 @@ private fun AddMerchantSheet(
     }
 
     fun fetchNearby() {
+        // Checked up front so a device with Location switched off entirely
+        // (common on a fresh emulator, but a real possibility for real
+        // users too) gets a direct link to the right settings screen
+        // instead of a generic "couldn't find your location" dead end --
+        // the fused client would otherwise just return null with no way
+        // to tell "off" apart from "no fix yet".
+        if (!isLocationEnabled()) {
+            hasSearched = true
+            results = emptyList()
+            locationServicesDisabled = true
+            errorMessage = "Location is turned off on this device."
+            return
+        }
+        locationServicesDisabled = false
+
         val fusedClient = LocationServices.getFusedLocationProviderClient(context)
         coroutineScope.launch {
             isSearching = true
@@ -3175,6 +3200,16 @@ private fun AddMerchantSheet(
                         onClick = { useMyLocation() },
                         enabled = !isSearching
                     )
+
+                    if (locationServicesDisabled) {
+                        Spacer(Modifier.height(8.dp))
+                        TieyohSecondaryButton(
+                            text = "Turn on Location",
+                            onClick = {
+                                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                            }
+                        )
+                    }
                 } else {
                     OutlinedTextField(
                         value = searchText,
