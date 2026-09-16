@@ -1,6 +1,8 @@
 package com.tieyoh.mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -8,6 +10,9 @@ import android.os.Bundle
 import android.text.format.DateUtils
 import android.util.Base64
 import android.widget.Toast
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,6 +90,7 @@ import com.tieyoh.mobile.ui.theme.TieyohTheme
 import com.tieyoh.mobile.ui.theme.TieyohTrack
 import com.google.gson.Gson
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import retrofit2.HttpException
 import java.time.LocalDate
 
@@ -2681,21 +2687,14 @@ private fun MyListScreen(currentUser: AuthResponse) {
             Text("My picks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Merchants you'd love a gift from. Set a wish target and your circle can chip in toward it — no payment method needed to set one.",
+                "Merchants you'd love a gift from. Set a wish target and your circle can chip in toward it.",
                 color = TieyohMuted
             )
             Spacer(Modifier.height(16.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
-                    .clickable { showAddSheet = true },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("+ Add a merchant to your list", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            }
+            TieyohPrimaryButton(
+                text = "+ Add a merchant to your list",
+                onClick = { showAddSheet = true }
+            )
         }
 
         when {
@@ -2946,12 +2945,24 @@ private fun TargetEditDialog(
 // can be set in this same step, or skipped and added later from the
 // "Set target" pill on the new card.
 @Composable
+private enum class MerchantSearchMode(val label: String) {
+    NAME("Name"),
+    ADDRESS("Address"),
+    NEAR_ME("Near me")
+}
+
+private fun formatDistance(miles: Double): String {
+    return if (miles < 0.1) "Nearby" else "%.1f mi away".format(miles)
+}
+
 private fun AddMerchantSheet(
     currentUser: AuthResponse,
     existingIds: Set<Long>,
     onDismiss: () -> Unit,
     onAdded: () -> Unit
 ) {
+    val context = LocalContext.current
+    var searchMode by remember { mutableStateOf(MerchantSearchMode.NAME) }
     var searchText by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
@@ -2963,6 +2974,16 @@ private fun AddMerchantSheet(
 
     val coroutineScope = rememberCoroutineScope()
 
+    fun switchMode(mode: MerchantSearchMode) {
+        if (searchMode == mode) return
+        searchMode = mode
+        searchText = ""
+        results = emptyList()
+        hasSearched = false
+        selected = null
+        errorMessage = null
+    }
+
     fun search() {
         if (searchText.isBlank()) return
         coroutineScope.launch {
@@ -2970,13 +2991,68 @@ private fun AddMerchantSheet(
             hasSearched = true
             errorMessage = null
             try {
-                results = RetrofitClient.merchantApi.searchMerchants(name = searchText.trim())
+                results = when (searchMode) {
+                    MerchantSearchMode.ADDRESS -> RetrofitClient.merchantApi.searchMerchants(address = searchText.trim())
+                    else -> RetrofitClient.merchantApi.searchMerchants(name = searchText.trim())
+                }
             } catch (e: Exception) {
                 results = emptyList()
                 errorMessage = "Unable to search places right now."
             } finally {
                 isSearching = false
             }
+        }
+    }
+
+    fun fetchNearby() {
+        val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+        coroutineScope.launch {
+            isSearching = true
+            hasSearched = true
+            errorMessage = null
+            try {
+                val location = fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+                if (location == null) {
+                    results = emptyList()
+                    errorMessage = "Couldn't get your location -- make sure location is turned on."
+                } else {
+                    results = RetrofitClient.merchantApi.getNearbyMerchants(
+                        lat = location.latitude,
+                        lng = location.longitude
+                    )
+                }
+            } catch (e: Exception) {
+                results = emptyList()
+                errorMessage = "Unable to find merchants near you right now."
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            fetchNearby()
+        } else {
+            errorMessage = "Location permission is needed to find merchants near you."
+        }
+    }
+
+    fun useMyLocation() {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            fetchNearby()
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
     }
 
@@ -3012,47 +3088,99 @@ private fun AddMerchantSheet(
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Add a merchant",
-                        style = MaterialTheme.typography.headlineSmall,
+                        "←",
+                        fontSize = 20.sp,
+                        color = TieyohNavy,
                         fontWeight = FontWeight.Bold,
-                        color = TieyohNavy
+                        modifier = Modifier
+                            .padding(vertical = 8.dp)
+                            .clickable { onDismiss() }
                     )
-                    Text(
-                        "Close",
-                        color = TieyohAccent,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable { onDismiss() }
-                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "Add a merchant",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TieyohNavy
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Search the Tieyoh merchant registry to add a pick to your list.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TieyohMuted
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(TieyohMuted.copy(alpha = 0.10f))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    MerchantSearchMode.values().forEach { mode ->
+                        val isActive = searchMode == mode
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isActive) Color.White else Color.Transparent)
+                                .clickable { switchMode(mode) }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                mode.label,
+                                fontSize = 13.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isActive) TieyohNavy else TieyohMuted
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(14.dp))
 
-                OutlinedTextField(
-                    value = searchText,
-                    onValueChange = { searchText = it },
-                    placeholder = { Text("Search for a place...") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { search() }),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (searchMode == MerchantSearchMode.NEAR_ME) {
+                    TieyohSecondaryButton(
+                        text = "Use my location",
+                        onClick = { useMyLocation() },
+                        enabled = !isSearching
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        placeholder = {
+                            Text(
+                                if (searchMode == MerchantSearchMode.ADDRESS)
+                                    "Search by address (full or partial)..."
+                                else
+                                    "Search for a place..."
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { search() }),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(TieyohAccent)
-                        .clickable { search() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Search", color = Color.White, fontWeight = FontWeight.Bold)
+                    TieyohSecondaryButton(
+                        text = "Search",
+                        onClick = { search() }
+                    )
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -3066,7 +3194,10 @@ private fun AddMerchantSheet(
                     }
 
                     hasSearched && results.isEmpty() -> Text(
-                        "No places found -- try a different search.",
+                        if (searchMode == MerchantSearchMode.NEAR_ME)
+                            "No merchants found near you."
+                        else
+                            "No places found -- try a different search.",
                         color = TieyohMuted,
                         fontSize = 13.sp
                     )
@@ -3095,7 +3226,13 @@ private fun AddMerchantSheet(
                             ) {
                                 Column {
                                     Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy)
-                                    merchant.category?.let { Text(it, fontSize = 12.sp, color = TieyohMuted) }
+                                    val subtitle = listOfNotNull(
+                                        merchant.category,
+                                        merchant.distanceMiles?.let { formatDistance(it) }
+                                    ).joinToString("  ·  ")
+                                    if (subtitle.isNotEmpty()) {
+                                        Text(subtitle, fontSize = 12.sp, color = TieyohMuted)
+                                    }
                                 }
                                 when {
                                     alreadyAdded -> Text("Already on your list", fontSize = 11.sp, color = TieyohMuted)
@@ -3133,32 +3270,16 @@ private fun AddMerchantSheet(
 
                 Spacer(Modifier.height(14.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .clip(RoundedCornerShape(25.dp))
-                        .background(
-                            if (selected != null && !isSaving) {
-                                Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient))
-                            } else {
-                                Brush.horizontalGradient(listOf(TieyohMuted.copy(alpha = 0.35f), TieyohMuted.copy(alpha = 0.35f)))
-                            }
-                        )
-                        .clickable(enabled = selected != null && !isSaving) { save() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-                    } else {
-                        Text("Add to my picks", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                    }
-                }
+                TieyohPrimaryButton(
+                    text = "Add to my picks",
+                    onClick = { save() },
+                    enabled = selected != null && !isSaving,
+                    isLoading = isSaving
+                )
             }
         }
     }
 }
-
 @Composable
 private fun MyCardScreen() {
 

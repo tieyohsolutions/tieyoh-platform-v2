@@ -17,6 +17,13 @@ interface MerchantApi {
         @Query("address") address: String? = null,
         @Query("merchantType") merchantType: String? = null
     ): List<MerchantDto>
+
+    @GET("api/merchants/mobile/nearby")
+    suspend fun getNearbyMerchants(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("radiusMiles") radiusMiles: Double = 25.0
+    ): List<MerchantDto>
 }
 
 object RetrofitClient {

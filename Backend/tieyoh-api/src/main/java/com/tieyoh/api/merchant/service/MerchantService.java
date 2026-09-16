@@ -1,11 +1,13 @@
 package com.tieyoh.api.merchant.service;
 
+import com.tieyoh.api.merchant.dto.MerchantMobileResponse;
 import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.repository.MerchantRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class MerchantService {
@@ -78,6 +80,30 @@ public class MerchantService {
                     merchant.setStatus("INACTIVE");
                     return merchantRepository.save(merchant);
                 });
+    }
+
+    // "Near me" in the Add-a-merchant flow -- distance from the device's
+    // current GPS position, computed against the latitude/longitude
+    // already stored on each merchant's location. No map rendering or
+    // geocoding involved, just the coordinates already on file.
+    public List<MerchantMobileResponse> getNearbyMerchants(double lat, double lng, double radiusMiles) {
+        return merchantRepository.findNearby(lat, lng, radiusMiles)
+                .stream()
+                .map(this::toNearbyResponse)
+                .collect(Collectors.toList());
+    }
+
+    private MerchantMobileResponse toNearbyResponse(MerchantRepository.MerchantWithDistance row) {
+        MerchantMobileResponse response = new MerchantMobileResponse();
+        response.setId(row.getId());
+        response.setTmid(row.getTmid());
+        response.setBrandName(row.getBrandName());
+        response.setLogoUrl(row.getLogoUrl());
+        response.setCategory(row.getCategory());
+        response.setStatus(row.getStatus());
+        response.setPmid(row.getPmid());
+        response.setDistanceMiles(row.getDistanceMiles());
+        return response;
     }
 
     private String normalize(String value) {

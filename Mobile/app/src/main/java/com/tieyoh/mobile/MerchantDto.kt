@@ -11,5 +11,8 @@ data class MerchantDto(
     // Only populated when this came from "My picks" (getMerchantSelections)
     // -- null for plain search results, where they're simply unused.
     val targetAmount: Double? = null,
-    val amountReceived: Double? = null
+    val amountReceived: Double? = null,
+    // Only populated on "Near me" search results (getNearbyMerchants) --
+    // null everywhere else.
+    val distanceMiles: Double? = null
 )

@@ -129,4 +129,54 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
             nativeQuery = true
     )
     Long getNextTmidSequence();
+
+    // Powers "Near me" in the Add-a-merchant flow -- uses the latitude/
+    // longitude already stored on merchant_location from the Outscraper
+    // import, no map rendering or geocoding involved. Haversine distance
+    // in miles from the given point; LEAST(1, ...) guards acos() against
+    // a >1 argument from floating-point rounding when a location is
+    // (near) exactly the query point, which would otherwise return NaN.
+    @Query(value = """
+            SELECT m.id AS id,
+                   m.tmid AS tmid,
+                   m.brand_name AS brandName,
+                   m.logo_url AS logoUrl,
+                   m.category AS category,
+                   m.status AS status,
+                   pm.pmid AS pmid,
+                   (3959 * acos(LEAST(1,
+                       cos(radians(:lat)) * cos(radians(ml.latitude)) *
+                       cos(radians(ml.longitude) - radians(:lng)) +
+                       sin(radians(:lat)) * sin(radians(ml.latitude))
+                   ))) AS distanceMiles
+            FROM merchant m
+            JOIN merchant_location ml ON ml.merchant_id = m.id
+            LEFT JOIN parent_merchant pm ON pm.id = m.parent_merchant_id
+            WHERE m.status = 'ACTIVE'
+              AND ml.latitude IS NOT NULL
+              AND ml.longitude IS NOT NULL
+              AND (3959 * acos(LEAST(1,
+                       cos(radians(:lat)) * cos(radians(ml.latitude)) *
+                       cos(radians(ml.longitude) - radians(:lng)) +
+                       sin(radians(:lat)) * sin(radians(ml.latitude))
+                   ))) <= :radiusMiles
+            ORDER BY distanceMiles ASC
+            LIMIT 50
+            """, nativeQuery = true)
+    List<MerchantWithDistance> findNearby(
+            @Param("lat") double lat,
+            @Param("lng") double lng,
+            @Param("radiusMiles") double radiusMiles
+    );
+
+    interface MerchantWithDistance {
+        Long getId();
+        String getTmid();
+        String getBrandName();
+        String getLogoUrl();
+        String getCategory();
+        String getStatus();
+        String getPmid();
+        Double getDistanceMiles();
+    }
 }

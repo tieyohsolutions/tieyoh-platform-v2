@@ -47,6 +47,15 @@ public class MerchantController {
                 .toList();
     }
 
+    @GetMapping("/mobile/nearby")
+    public List<MerchantMobileResponse> getNearbyMerchantsForMobile(
+            @RequestParam double lat,
+            @RequestParam double lng,
+            @RequestParam(required = false, defaultValue = "25") double radiusMiles) {
+
+        return merchantService.getNearbyMerchants(lat, lng, radiusMiles);
+    }
+
     @GetMapping
     public List<Merchant> getAllMerchants() {
         return merchantService.getAllMerchants();

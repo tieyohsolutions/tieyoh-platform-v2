@@ -15,6 +15,8 @@ public class MerchantMobileResponse {
     // Gift's favorite-places use of this same DTO just ignores them.
     private BigDecimal targetAmount;
     private BigDecimal amountReceived;
+    // Only set on "Near me" results (getNearbyMerchants) -- null everywhere else.
+    private Double distanceMiles;
 
     public Long getId() {
         return id;
@@ -86,5 +88,13 @@ public class MerchantMobileResponse {
 
     public void setAmountReceived(BigDecimal amountReceived) {
         this.amountReceived = amountReceived;
+    }
+
+    public Double getDistanceMiles() {
+        return distanceMiles;
+    }
+
+    public void setDistanceMiles(Double distanceMiles) {
+        this.distanceMiles = distanceMiles;
     }
 }
