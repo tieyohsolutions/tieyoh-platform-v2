@@ -3,6 +3,7 @@ package com.tieyoh.mobile
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
 import android.provider.Settings
 import android.util.Log as AndroidLog
@@ -16,6 +17,14 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -2950,7 +2959,7 @@ private fun TargetEditDialog(
 private enum class MerchantSearchMode(val label: String) {
     NAME("Name"),
     ADDRESS("Address"),
-    NEAR_ME("Near me")
+    MAP("Map")
 }
 
 private fun formatDistance(miles: Double): String {
@@ -2975,6 +2984,13 @@ private fun AddMerchantSheet(
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var locationServicesDisabled by remember { mutableStateOf(false) }
+    var hasLocationPermission by remember { mutableStateOf(false) }
+    // Map mode's own map/list sub-toggle -- "user can switch from a map to
+    // a list and see all merchants in the area."
+    var showMapView by remember { mutableStateOf(true) }
+    var showSearchThisArea by remember { mutableStateOf(false) }
+    var lastSearchedCenter by remember { mutableStateOf<LatLng?>(null) }
+    val cameraPositionState = rememberCameraPositionState()
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -2982,6 +2998,30 @@ private fun AddMerchantSheet(
         val locationManager = context.getSystemService(LocationManager::class.java)
         return locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
                 locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+    }
+
+    // Shared by both "locate me" (fetchNearby, below) and the map's
+    // "Search this area" button -- the only difference is whether the
+    // camera should jump to the new center or stay put because the user
+    // just put it there themselves by panning.
+    suspend fun fetchNearbyAt(lat: Double, lng: Double, moveCamera: Boolean) {
+        isSearching = true
+        hasSearched = true
+        errorMessage = null
+        try {
+            results = RetrofitClient.merchantApi.getNearbyMerchants(lat = lat, lng = lng)
+            lastSearchedCenter = LatLng(lat, lng)
+            showSearchThisArea = false
+            if (moveCamera) {
+                cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(lat, lng), 14f)
+            }
+        } catch (e: Exception) {
+            AndroidLog.e("AddMerchantSheet", "Failed to fetch nearby merchants", e)
+            results = emptyList()
+            errorMessage = "Unable to find merchants near you right now."
+        } finally {
+            isSearching = false
+        }
     }
 
     fun switchMode(mode: MerchantSearchMode) {
@@ -2993,6 +3033,11 @@ private fun AddMerchantSheet(
         selected = null
         errorMessage = null
         locationServicesDisabled = false
+        showSearchThisArea = false
+        lastSearchedCenter = null
+        if (mode == MerchantSearchMode.MAP) {
+            showMapView = true
+        }
     }
 
     fun search() {
@@ -3057,17 +3102,14 @@ private fun AddMerchantSheet(
                 if (location == null) {
                     results = emptyList()
                     errorMessage = "Couldn't get your location -- make sure location is turned on."
+                    isSearching = false
                 } else {
-                    results = RetrofitClient.merchantApi.getNearbyMerchants(
-                        lat = location.latitude,
-                        lng = location.longitude
-                    )
+                    fetchNearbyAt(location.latitude, location.longitude, moveCamera = true)
                 }
             } catch (e: Exception) {
                 AndroidLog.e("AddMerchantSheet", "Failed to fetch nearby merchants", e)
                 results = emptyList()
                 errorMessage = "Unable to find merchants near you right now."
-            } finally {
                 isSearching = false
             }
         }
@@ -3076,6 +3118,7 @@ private fun AddMerchantSheet(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        hasLocationPermission = granted
         if (granted) {
             fetchNearby()
         } else {
@@ -3092,10 +3135,40 @@ private fun AddMerchantSheet(
             Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
+        hasLocationPermission = hasPermission
+
         if (hasPermission) {
             fetchNearby()
         } else {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    // Auto-locate the moment Map mode is entered -- "the page will populate
+    // a map and will be set close to my location" -- rather than waiting on
+    // an extra tap. switchMode() only fires this once per entry (it early-
+    // returns if the mode doesn't actually change), so re-tapping Map after
+    // it's already active won't spam relocate; leaving and coming back will.
+    LaunchedEffect(searchMode) {
+        if (searchMode == MerchantSearchMode.MAP && lastSearchedCenter == null) {
+            useMyLocation()
+        }
+    }
+
+    // Offers "Search this area" once the user pans away from wherever was
+    // last searched and lets go -- not while the map is still moving under
+    // their finger, and not for a jitter-sized nudge.
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (!cameraPositionState.isMoving) {
+            val center = cameraPositionState.position.target
+            val last = lastSearchedCenter
+            if (last != null) {
+                val distanceMeters = FloatArray(1)
+                Location.distanceBetween(last.latitude, last.longitude, center.latitude, center.longitude, distanceMeters)
+                if (distanceMeters[0] > 400) {
+                    showSearchThisArea = true
+                }
+            }
         }
     }
 
@@ -3194,21 +3267,44 @@ private fun AddMerchantSheet(
 
                 Spacer(Modifier.height(14.dp))
 
-                if (searchMode == MerchantSearchMode.NEAR_ME) {
-                    TieyohSecondaryButton(
-                        text = "Use my location",
-                        onClick = { useMyLocation() },
-                        enabled = !isSearching
-                    )
-
+                if (searchMode == MerchantSearchMode.MAP) {
                     if (locationServicesDisabled) {
-                        Spacer(Modifier.height(8.dp))
                         TieyohSecondaryButton(
                             text = "Turn on Location",
                             onClick = {
                                 context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                             }
                         )
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(TieyohMuted.copy(alpha = 0.10f))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        listOf("Map" to true, "List" to false).forEach { (label, isMap) ->
+                            val isActive = showMapView == isMap
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isActive) Color.White else Color.Transparent)
+                                    .clickable { showMapView = isMap }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isActive) TieyohNavy else TieyohMuted
+                                )
+                            }
+                        }
                     }
                 } else {
                     OutlinedTextField(
@@ -3238,58 +3334,129 @@ private fun AddMerchantSheet(
 
                 Spacer(Modifier.height(14.dp))
 
-                when {
-                    isSearching -> Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                        contentAlignment = Alignment.Center
+                if (searchMode == MerchantSearchMode.MAP && showMapView) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
                     ) {
-                        CircularProgressIndicator(color = TieyohAccent)
-                    }
-
-                    hasSearched && results.isEmpty() -> Text(
-                        if (searchMode == MerchantSearchMode.NEAR_ME)
-                            "No merchants found near you."
-                        else
-                            "No places found -- try a different search.",
-                        color = TieyohMuted,
-                        fontSize = 13.sp
-                    )
-
-                    else -> LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(results, key = { it.id }) { merchant ->
-                            val alreadyAdded = merchant.id in existingIds
-                            val isSelected = selected?.id == merchant.id
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isSelected) TieyohAccent.copy(alpha = 0.10f) else Color.White)
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isSelected) TieyohAccent else TieyohMuted.copy(alpha = 0.25f),
-                                        shape = RoundedCornerShape(14.dp)
+                        GoogleMap(
+                            modifier = Modifier.fillMaxSize(),
+                            cameraPositionState = cameraPositionState,
+                            properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
+                            uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false)
+                        ) {
+                            results.forEach { merchant ->
+                                val lat = merchant.latitude
+                                val lng = merchant.longitude
+                                if (lat != null && lng != null) {
+                                    val alreadyAdded = merchant.id in existingIds
+                                    Marker(
+                                        state = MarkerState(position = LatLng(lat, lng)),
+                                        title = merchant.brandName,
+                                        snippet = if (alreadyAdded) "Already on your list" else merchant.category,
+                                        onClick = {
+                                            if (!alreadyAdded) selected = merchant
+                                            true
+                                        }
                                     )
-                                    .clickable(enabled = !alreadyAdded) { selected = merchant }
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy)
-                                    val subtitle = listOfNotNull(
-                                        merchant.category,
-                                        merchant.distanceMiles?.let { formatDistance(it) }
-                                    ).joinToString("  ·  ")
-                                    if (subtitle.isNotEmpty()) {
-                                        Text(subtitle, fontSize = 12.sp, color = TieyohMuted)
-                                    }
                                 }
-                                when {
-                                    alreadyAdded -> Text("Already on your list", fontSize = 11.sp, color = TieyohMuted)
-                                    isSelected -> Text("Selected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TieyohAccent)
+                            }
+                        }
+
+                        if (isSearching) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = TieyohAccent)
+                            }
+                        }
+
+                        if (hasSearched && results.isEmpty() && !isSearching) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 12.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text("No merchants found in this area.", fontSize = 12.sp, color = TieyohMuted)
+                            }
+                        }
+
+                        if (showSearchThisArea) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 40.dp, vertical = 12.dp)
+                            ) {
+                                TieyohSecondaryButton(
+                                    text = "Search this area",
+                                    onClick = {
+                                        val target = cameraPositionState.position.target
+                                        coroutineScope.launch {
+                                            fetchNearbyAt(target.latitude, target.longitude, moveCamera = false)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    when {
+                        isSearching -> Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = TieyohAccent)
+                        }
+
+                        hasSearched && results.isEmpty() -> Text(
+                            if (searchMode == MerchantSearchMode.MAP)
+                                "No merchants found near you."
+                            else
+                                "No places found -- try a different search.",
+                            color = TieyohMuted,
+                            fontSize = 13.sp
+                        )
+
+                        else -> LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(results, key = { it.id }) { merchant ->
+                                val alreadyAdded = merchant.id in existingIds
+                                val isSelected = selected?.id == merchant.id
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isSelected) TieyohAccent.copy(alpha = 0.10f) else Color.White)
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isSelected) TieyohAccent else TieyohMuted.copy(alpha = 0.25f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable(enabled = !alreadyAdded) { selected = merchant }
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                                        val subtitle = listOfNotNull(
+                                            merchant.category,
+                                            merchant.distanceMiles?.let { formatDistance(it) }
+                                        ).joinToString("  ·  ")
+                                        if (subtitle.isNotEmpty()) {
+                                            Text(subtitle, fontSize = 12.sp, color = TieyohMuted)
+                                        }
+                                    }
+                                    when {
+                                        alreadyAdded -> Text("Already on your list", fontSize = 11.sp, color = TieyohMuted)
+                                        isSelected -> Text("Selected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TieyohAccent)
+                                    }
                                 }
                             }
                         }

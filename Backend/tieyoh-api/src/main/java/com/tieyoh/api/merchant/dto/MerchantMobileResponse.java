@@ -15,8 +15,12 @@ public class MerchantMobileResponse {
     // Gift's favorite-places use of this same DTO just ignores them.
     private BigDecimal targetAmount;
     private BigDecimal amountReceived;
-    // Only set on "Near me" results (getNearbyMerchants) -- null everywhere else.
+    // Both only set on Map/Near-me results (getNearbyMerchants) -- null
+    // everywhere else. latitude/longitude back marker placement on the map;
+    // distanceMiles backs the "N.N mi away" line in list view.
     private Double distanceMiles;
+    private Double latitude;
+    private Double longitude;
 
     public Long getId() {
         return id;
@@ -96,5 +100,21 @@ public class MerchantMobileResponse {
 
     public void setDistanceMiles(Double distanceMiles) {
         this.distanceMiles = distanceMiles;
+    }
+
+    public Double getLatitude() {
+        return latitude;
+    }
+
+    public void setLatitude(Double latitude) {
+        this.latitude = latitude;
+    }
+
+    public Double getLongitude() {
+        return longitude;
+    }
+
+    public void setLongitude(Double longitude) {
+        this.longitude = longitude;
     }
 }

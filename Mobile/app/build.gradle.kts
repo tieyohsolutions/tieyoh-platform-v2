@@ -1,7 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Google Maps API key, read from local.properties (git-ignored) so it never
+// gets committed. Add MAPS_API_KEY=<your key> there -- see the map feature's
+// commit message for how to get one. Left blank, the manifest placeholder
+// below resolves to an empty string and the map screen renders with no
+// tiles (a gray grid) rather than failing to build.
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY", "")
 
 android {
     namespace = "com.tieyoh.mobile"
@@ -17,6 +32,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
@@ -43,6 +59,8 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("com.google.android.gms:play-services-maps:19.0.0")
+    implementation("com.google.maps.android:maps-compose:6.4.1")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

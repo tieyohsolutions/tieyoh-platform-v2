@@ -103,6 +103,8 @@ public class MerchantService {
         response.setStatus(row.getStatus());
         response.setPmid(row.getPmid());
         response.setDistanceMiles(row.getDistanceMiles());
+        response.setLatitude(row.getLatitude());
+        response.setLongitude(row.getLongitude());
         return response;
     }
 

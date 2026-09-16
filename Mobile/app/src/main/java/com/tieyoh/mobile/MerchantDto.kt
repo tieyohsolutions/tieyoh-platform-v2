@@ -12,7 +12,11 @@ data class MerchantDto(
     // -- null for plain search results, where they're simply unused.
     val targetAmount: Double? = null,
     val amountReceived: Double? = null,
-    // Only populated on "Near me" search results (getNearbyMerchants) --
-    // null everywhere else.
-    val distanceMiles: Double? = null
+    // All three only populated on Map/Near-me search results
+    // (getNearbyMerchants) -- null everywhere else. latitude/longitude
+    // back marker placement on the map; distanceMiles backs the list
+    // view's "N.N mi away" line.
+    val distanceMiles: Double? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )

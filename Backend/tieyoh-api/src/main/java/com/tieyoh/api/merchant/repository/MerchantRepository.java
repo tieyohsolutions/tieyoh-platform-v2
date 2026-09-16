@@ -144,6 +144,8 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
                    m.category AS category,
                    m.status AS status,
                    pm.pmid AS pmid,
+                   ml.latitude AS latitude,
+                   ml.longitude AS longitude,
                    (3959 * acos(LEAST(1,
                        cos(radians(:lat)) * cos(radians(ml.latitude)) *
                        cos(radians(ml.longitude) - radians(:lng)) +
@@ -177,6 +179,8 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
         String getCategory();
         String getStatus();
         String getPmid();
+        Double getLatitude();
+        Double getLongitude();
         Double getDistanceMiles();
     }
 }
