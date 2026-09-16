@@ -3,6 +3,7 @@ package com.tieyoh.mobile
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log as AndroidLog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -3011,7 +3012,23 @@ private fun AddMerchantSheet(
             hasSearched = true
             errorMessage = null
             try {
-                val location = fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+                // lastLocation resolves immediately from whatever fix the provider
+                // already has -- on an emulator, that's exactly what Extended
+                // Controls' "Set location" just pushed. getCurrentLocation asks
+                // for a brand-new fix instead, which can sit unresolved on an
+                // emulator's simulated GPS provider even after a location has
+                // been set, so it's only the fallback here, not the primary path.
+                var location = try {
+                    fusedClient.lastLocation.await()
+                } catch (e: Exception) {
+                    AndroidLog.w("AddMerchantSheet", "lastLocation failed, falling back to getCurrentLocation", e)
+                    null
+                }
+
+                if (location == null) {
+                    location = fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+                }
+
                 if (location == null) {
                     results = emptyList()
                     errorMessage = "Couldn't get your location -- make sure location is turned on."
@@ -3022,6 +3039,7 @@ private fun AddMerchantSheet(
                     )
                 }
             } catch (e: Exception) {
+                AndroidLog.e("AddMerchantSheet", "Failed to fetch nearby merchants", e)
                 results = emptyList()
                 errorMessage = "Unable to find merchants near you right now."
             } finally {
