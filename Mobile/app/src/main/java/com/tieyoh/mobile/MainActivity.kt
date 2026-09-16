@@ -2944,7 +2944,6 @@ private fun TargetEditDialog(
 // any other pick already on the list. A wish target is optional here: it
 // can be set in this same step, or skipped and added later from the
 // "Set target" pill on the new card.
-@Composable
 private enum class MerchantSearchMode(val label: String) {
     NAME("Name"),
     ADDRESS("Address"),
@@ -2955,6 +2954,7 @@ private fun formatDistance(miles: Double): String {
     return if (miles < 0.1) "Nearby" else "%.1f mi away".format(miles)
 }
 
+@Composable
 private fun AddMerchantSheet(
     currentUser: AuthResponse,
     existingIds: Set<Long>,
