@@ -149,13 +149,19 @@ fun EditProfileScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onDone) {
+            IconButton(onClick = onDone, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Profile",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(Modifier.height(12.dp))

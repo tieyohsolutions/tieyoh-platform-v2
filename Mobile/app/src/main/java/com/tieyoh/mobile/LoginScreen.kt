@@ -33,6 +33,7 @@ import com.tieyoh.mobile.R
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandDarkBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavy
+import com.tieyoh.mobile.ui.theme.TieyohNavy
 import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
 import com.tieyoh.mobile.ui.theme.TieyohMuted
 import kotlinx.coroutines.launch
@@ -259,13 +260,23 @@ fun LoginScreen(
                 } else {
                     onBack()
                 }
-            }) {
+            }, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
-                    tint = TieyohBrandNavy
+                    tint = TieyohNavy
                 )
             }
+            // Matches the IconButton's own conditional above: mid-OTP this
+            // arrow steps back into the email/password form rather than
+            // leaving the screen, so the label says "Login" (where you're
+            // actually landing) instead of always claiming "Welcome".
+            Text(
+                text = if (isSignupMode && awaitingOtp) "Login" else "Welcome",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(Modifier.height(4.dp))

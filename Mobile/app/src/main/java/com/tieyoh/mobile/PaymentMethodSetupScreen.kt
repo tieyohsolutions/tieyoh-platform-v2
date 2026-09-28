@@ -86,7 +86,14 @@ import com.tieyoh.mobile.ui.theme.TieyohNavy
 fun PaymentMethodSetupScreen(
     onDone: () -> Unit,
     onBack: () -> Unit = onDone,
-    doneButtonLabel: String? = null
+    doneButtonLabel: String? = null,
+    // Static per-call-site label rather than something derived -- like
+    // onBack itself just above, there's no single correct "previous
+    // screen" this composable can infer on its own. The two real entry
+    // points genuinely return to different places (Merchant Selection
+    // during onboarding, Profile from Settings), so this follows the same
+    // override-at-the-call-site pattern onBack already uses.
+    backLabel: String = "Profile"
 ) {
     val context = LocalContext.current
     var savedMethods by remember { mutableStateOf(PaymentMethodStore.load(context)) }
@@ -163,13 +170,19 @@ fun PaymentMethodSetupScreen(
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
-                        tint = TieyohBrandNavy
+                        tint = TieyohNavy
                     )
                 }
+                Text(
+                    text = backLabel,
+                    color = TieyohNavy,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
             }
 
             Spacer(Modifier.height(4.dp))

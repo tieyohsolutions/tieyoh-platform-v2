@@ -11,13 +11,20 @@ public class MerchantMobileResponse {
     private String logoUrl;
     private String category;
     private String status;
+    // Whether this merchant accepts scanned Tieyoh payment QR codes -- see
+    // Merchant.partnered. Populated on every response this DTO backs (not
+    // just Find Partnered Merchants) so any screen can show a "Partnered"
+    // badge if it wants to, even though today only the partnered-only
+    // endpoints actually filter on it.
+    private Boolean partnered;
     // Both null/zero unless this response is backing "My picks" -- Send
     // Gift's favorite-places use of this same DTO just ignores them.
     private BigDecimal targetAmount;
     private BigDecimal amountReceived;
-    // Both only set on Map/Near-me results (getNearbyMerchants) -- null
-    // everywhere else. latitude/longitude back marker placement on the map;
-    // distanceMiles backs the "N.N mi away" line in list view.
+    // Both only set on Map/Near-me results (getNearbyMerchants /
+    // getNearbyPartneredMerchants) -- null everywhere else. latitude/
+    // longitude back marker placement on the map; distanceMiles backs the
+    // "N.N mi away" line in list view.
     private Double distanceMiles;
     private Double latitude;
     private Double longitude;
@@ -76,6 +83,14 @@ public class MerchantMobileResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Boolean getPartnered() {
+        return partnered;
+    }
+
+    public void setPartnered(Boolean partnered) {
+        this.partnered = partnered;
     }
 
     public BigDecimal getTargetAmount() {

@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandDarkBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavy
+import com.tieyoh.mobile.ui.theme.TieyohNavy
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavyLight2
 import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
 
@@ -135,13 +136,19 @@ fun ContactsPermissionScreen(
                     .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
-                        tint = TieyohBrandNavy
+                        tint = TieyohNavy
                     )
                 }
+                Text(
+                    text = "Find Friends",
+                    color = TieyohNavy,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
             }
 
             Spacer(Modifier.height(4.dp))

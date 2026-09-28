@@ -33,21 +33,18 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
             """)
     List<Merchant> findAllWithParentMerchant();
 
+    // One combined query, OR'd across the merchant's own name and every
+    // field on each of its locations (street address, city, state, ZIP)
+    // -- a caller no longer has to know in advance whether what they typed
+    // is a business name or a piece of an address; "Starbucks", "123 Main
+    // St", "St. Louis", and "63101" all match through this single param.
+    // merchantType is a separate, independent facet (a category filter),
+    // so it stays its own ANDed clause rather than folding into the OR.
     @Query("""
             SELECT DISTINCT m
             FROM Merchant m
             LEFT JOIN FETCH m.parentMerchant
             WHERE m.status = 'ACTIVE'
-
-              AND (
-                    :name IS NULL
-                    OR LOWER(m.brandName) LIKE
-                       CONCAT(
-                           '%',
-                           LOWER(CAST(:name AS String)),
-                           '%'
-                       )
-                  )
 
               AND (
                     :merchantType IS NULL
@@ -60,56 +57,47 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
                   )
 
               AND (
-                    :zip IS NULL
+                    :query IS NULL
+                    OR LOWER(m.brandName) LIKE
+                       CONCAT(
+                           '%',
+                           LOWER(CAST(:query AS String)),
+                           '%'
+                       )
                     OR EXISTS (
                         SELECT ml.id
                         FROM MerchantLocation ml
                         WHERE ml.merchant = m
-                          AND LOWER(COALESCE(ml.postalCode, '')) LIKE
-                              CONCAT(
-                                  '%',
-                                  LOWER(CAST(:zip AS String)),
-                                  '%'
-                              )
-                    )
-                  )
-
-              AND (
-                    :address IS NULL
-                    OR EXISTS (
-                        SELECT ml2.id
-                        FROM MerchantLocation ml2
-                        WHERE ml2.merchant = m
                           AND LOWER(
                                 CONCAT(
                                     CONCAT(
                                         CONCAT(
-                                            COALESCE(ml2.addressLine1, ''),
+                                            COALESCE(ml.addressLine1, ''),
                                             ' '
                                         ),
                                         CONCAT(
-                                            COALESCE(ml2.addressLine2, ''),
+                                            COALESCE(ml.addressLine2, ''),
                                             ' '
                                         )
                                     ),
                                     CONCAT(
                                         CONCAT(
-                                            COALESCE(ml2.city, ''),
+                                            COALESCE(ml.city, ''),
                                             ' '
                                         ),
                                         CONCAT(
                                             CONCAT(
-                                                COALESCE(ml2.state, ''),
+                                                COALESCE(ml.state, ''),
                                                 ' '
                                             ),
-                                            COALESCE(ml2.postalCode, '')
+                                            COALESCE(ml.postalCode, '')
                                         )
                                     )
                                 )
                               ) LIKE
                               CONCAT(
                                   '%',
-                                  LOWER(CAST(:address AS String)),
+                                  LOWER(CAST(:query AS String)),
                                   '%'
                               )
                     )
@@ -118,9 +106,86 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
             ORDER BY m.brandName
             """)
     List<Merchant> searchEligibleMerchants(
-            @Param("name") String name,
-            @Param("zip") String zip,
-            @Param("address") String address,
+            @Param("query") String query,
+            @Param("merchantType") String merchantType
+    );
+
+    // Same OR-across-name-and-every-location-field search as
+    // searchEligibleMerchants above, restricted to merchants that have
+    // signed up to accept scanned Tieyoh payment QR codes (m.partnered =
+    // true). Kept as its own query rather than adding a parameter to the
+    // one above so the general merchant registry search (Add a merchant,
+    // Send Gift's merchant picker, etc.) is never at risk of an
+    // accidental behavior change from this -- "Find Partnered Merchants"
+    // is the only caller of this one.
+    @Query("""
+            SELECT DISTINCT m
+            FROM Merchant m
+            LEFT JOIN FETCH m.parentMerchant
+            WHERE m.status = 'ACTIVE'
+              AND m.partnered = true
+
+              AND (
+                    :merchantType IS NULL
+                    OR LOWER(COALESCE(m.category, '')) LIKE
+                       CONCAT(
+                           '%',
+                           LOWER(CAST(:merchantType AS String)),
+                           '%'
+                       )
+                  )
+
+              AND (
+                    :query IS NULL
+                    OR LOWER(m.brandName) LIKE
+                       CONCAT(
+                           '%',
+                           LOWER(CAST(:query AS String)),
+                           '%'
+                       )
+                    OR EXISTS (
+                        SELECT ml.id
+                        FROM MerchantLocation ml
+                        WHERE ml.merchant = m
+                          AND LOWER(
+                                CONCAT(
+                                    CONCAT(
+                                        CONCAT(
+                                            COALESCE(ml.addressLine1, ''),
+                                            ' '
+                                        ),
+                                        CONCAT(
+                                            COALESCE(ml.addressLine2, ''),
+                                            ' '
+                                        )
+                                    ),
+                                    CONCAT(
+                                        CONCAT(
+                                            COALESCE(ml.city, ''),
+                                            ' '
+                                        ),
+                                        CONCAT(
+                                            CONCAT(
+                                                COALESCE(ml.state, ''),
+                                                ' '
+                                            ),
+                                            COALESCE(ml.postalCode, '')
+                                        )
+                                    )
+                                )
+                              ) LIKE
+                              CONCAT(
+                                  '%',
+                                  LOWER(CAST(:query AS String)),
+                                  '%'
+                              )
+                    )
+                  )
+
+            ORDER BY m.brandName
+            """)
+    List<Merchant> searchEligiblePartneredMerchants(
+            @Param("query") String query,
             @Param("merchantType") String merchantType
     );
 
@@ -143,6 +208,7 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
                    m.logo_url AS logoUrl,
                    m.category AS category,
                    m.status AS status,
+                   m.partnered AS partnered,
                    pm.pmid AS pmid,
                    ml.latitude AS latitude,
                    ml.longitude AS longitude,
@@ -171,6 +237,47 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
             @Param("radiusMiles") double radiusMiles
     );
 
+    // Same "near me" Haversine search as findNearby above, restricted to
+    // merchants that have signed up to accept scanned Tieyoh payment QR
+    // codes (m.partnered = true) -- backs the Map tab on "Find Partnered
+    // Merchants" (PartneredMerchantSearchScreen.kt).
+    @Query(value = """
+            SELECT m.id AS id,
+                   m.tmid AS tmid,
+                   m.brand_name AS brandName,
+                   m.logo_url AS logoUrl,
+                   m.category AS category,
+                   m.status AS status,
+                   m.partnered AS partnered,
+                   pm.pmid AS pmid,
+                   ml.latitude AS latitude,
+                   ml.longitude AS longitude,
+                   (3959 * acos(LEAST(1,
+                       cos(radians(:lat)) * cos(radians(ml.latitude)) *
+                       cos(radians(ml.longitude) - radians(:lng)) +
+                       sin(radians(:lat)) * sin(radians(ml.latitude))
+                   ))) AS distanceMiles
+            FROM merchant m
+            JOIN merchant_location ml ON ml.merchant_id = m.id
+            LEFT JOIN parent_merchant pm ON pm.id = m.parent_merchant_id
+            WHERE m.status = 'ACTIVE'
+              AND m.partnered = true
+              AND ml.latitude IS NOT NULL
+              AND ml.longitude IS NOT NULL
+              AND (3959 * acos(LEAST(1,
+                       cos(radians(:lat)) * cos(radians(ml.latitude)) *
+                       cos(radians(ml.longitude) - radians(:lng)) +
+                       sin(radians(:lat)) * sin(radians(ml.latitude))
+                   ))) <= :radiusMiles
+            ORDER BY distanceMiles ASC
+            LIMIT 50
+            """, nativeQuery = true)
+    List<MerchantWithDistance> findNearbyPartnered(
+            @Param("lat") double lat,
+            @Param("lng") double lng,
+            @Param("radiusMiles") double radiusMiles
+    );
+
     interface MerchantWithDistance {
         Long getId();
         String getTmid();
@@ -178,6 +285,7 @@ public interface MerchantRepository extends JpaRepository<Merchant, Long> {
         String getLogoUrl();
         String getCategory();
         String getStatus();
+        Boolean getPartnered();
         String getPmid();
         Double getLatitude();
         Double getLongitude();

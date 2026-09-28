@@ -121,6 +121,12 @@ fun MyQrCodeScreen(
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Profile",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(Modifier.height(2.dp))

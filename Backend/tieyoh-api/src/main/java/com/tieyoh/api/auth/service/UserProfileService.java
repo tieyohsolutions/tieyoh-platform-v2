@@ -275,6 +275,13 @@ public class UserProfileService {
         response.setLogoUrl(merchant.getLogoUrl());
         response.setCategory(merchant.getCategory());
         response.setStatus(merchant.getStatus());
+        // Missing here was the whole reason a partnered merchant's logo
+        // never showed on "My Gift Cards"/"My picks" -- the mobile app's
+        // MerchantBalanceRow/MerchantPickCard only render a logo when
+        // partnered is true, and this response object was leaving that
+        // field at its default (null), regardless of the real value in
+        // the merchant table.
+        response.setPartnered(merchant.isPartnered());
         if (merchant.getParentMerchant() != null) {
             response.setPmid(merchant.getParentMerchant().getPmid());
         }

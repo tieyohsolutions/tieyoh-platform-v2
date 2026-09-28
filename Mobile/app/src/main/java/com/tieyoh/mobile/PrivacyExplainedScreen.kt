@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandDarkBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavy
+import com.tieyoh.mobile.ui.theme.TieyohNavy
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavyLight2
 import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
 import com.tieyoh.mobile.ui.theme.TieyohMuted
@@ -132,13 +133,19 @@ fun PrivacyExplainedScreen(
                     .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
-                        tint = TieyohBrandNavy
+                        tint = TieyohNavy
                     )
                 }
+                Text(
+                    text = "Choose ID",
+                    color = TieyohNavy,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
             }
 
             Spacer(Modifier.height(4.dp))
@@ -309,13 +316,19 @@ fun LegalPlaceholderScreen(onBack: () -> Unit) {
                 .padding(top = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
-                    tint = TieyohBrandNavy
+                    tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Privacy",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(Modifier.height(32.dp))
