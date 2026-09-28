@@ -25,6 +25,7 @@ public class MerchantImportRecord {
     private String website;
     private String logoUrl;
     private String category;
+    private String status;
 
     public String getSource() {
         return source;
@@ -159,5 +160,13 @@ public class MerchantImportRecord {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 }

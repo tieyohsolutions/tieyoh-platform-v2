@@ -2,6 +2,7 @@ package com.tieyoh.api.auth.entity;
 
 import com.tieyoh.api.merchant.entity.Merchant;
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -22,6 +23,14 @@ public class UserMerchantList {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "merchant_id", nullable = false)
     private Merchant merchant;
+
+    // Optional wish target the user set for this pick -- null until they
+    // choose to set one, either right when adding the merchant or later
+    // from "My picks". Purely a goal amount; how much has actually been
+    // received toward it is derived separately from the Gift table, not
+    // stored here.
+    @Column(name = "target_amount", precision = 10, scale = 2)
+    private BigDecimal targetAmount;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -60,5 +69,13 @@ public class UserMerchantList {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public BigDecimal getTargetAmount() {
+        return targetAmount;
+    }
+
+    public void setTargetAmount(BigDecimal targetAmount) {
+        this.targetAmount = targetAmount;
     }
 }

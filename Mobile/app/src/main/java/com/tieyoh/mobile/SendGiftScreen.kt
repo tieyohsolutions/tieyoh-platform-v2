@@ -147,13 +147,19 @@ fun SendGiftScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onCancel) {
+                IconButton(onClick = onCancel, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
                         tint = TieyohNavy
                     )
                 }
+                Text(
+                    text = "Feed",
+                    color = TieyohNavy,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
             }
         }
 

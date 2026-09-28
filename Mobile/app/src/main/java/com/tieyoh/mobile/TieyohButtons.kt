@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
@@ -61,25 +62,57 @@ fun TieyohPrimaryButton(
     enabled: Boolean = true,
     isLoading: Boolean = false,
     fillWidth: Boolean = true,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
+    // Overrides the default blue->teal gradient with a solid fill (e.g.
+    // a dark-navy CTA that still needs to read as this same button
+    // standard -- same pill/height/font, just a different color for that
+    // one screen). Null keeps the normal gradient. Ignored when disabled,
+    // which always shows the muted gray regardless.
+    backgroundColor: Color? = null,
+    // Escape hatch for a caller that needs one of the app's own
+    // hand-drawn Canvas glyphs (e.g. WalletGlyph) instead of a plain
+    // Material ImageVector as the leading icon -- takes over the leading
+    // icon slot entirely when set (icon is ignored), same 18dp-ish sizing
+    // expected of whatever's passed in.
+    leadingContent: (@Composable () -> Unit)? = null,
+    // Per-instance override for a button that needs to read as bigger/
+    // more prominent than the app's normal pill (e.g. a hero CTA).
+    // Defaults to the standard height everywhere else.
+    height: Dp = TieyohButtonHeight
 ) {
     Box(
         modifier = modifier
             .let { if (fillWidth) it.fillMaxWidth() else it }
-            .height(TieyohButtonHeight)
+            .height(height)
             .clip(TieyohButtonShape)
-            .background(if (enabled) TieyohButtonGradient else TieyohButtonDisabledGradient)
+            .let {
+                when {
+                    !enabled -> it.background(TieyohButtonDisabledGradient)
+                    backgroundColor != null -> it.background(backgroundColor)
+                    else -> it.background(TieyohButtonGradient)
+                }
+            }
             .clickable(enabled = enabled && !isLoading) { onClick() }
             .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-        } else if (icon != null) {
+        } else if (leadingContent != null || icon != null || trailingIcon != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
+                if (leadingContent != null) {
+                    leadingContent()
+                    Spacer(modifier = Modifier.width(8.dp))
+                } else if (icon != null) {
+                    Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text(text, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                if (trailingIcon != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(imageVector = trailingIcon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
             }
         } else {
             Text(text, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -94,7 +127,8 @@ fun TieyohSecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     fillWidth: Boolean = true,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    trailingIcon: ImageVector? = null
 ) {
     Box(
         modifier = modifier
@@ -107,11 +141,17 @@ fun TieyohSecondaryButton(
             .padding(horizontal = 22.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (icon != null) {
+        if (icon != null || trailingIcon != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = icon, contentDescription = null, tint = TieyohBrandBlue, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
+                if (icon != null) {
+                    Icon(imageVector = icon, contentDescription = null, tint = TieyohBrandBlue, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text(text, color = TieyohBrandBlue, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                if (trailingIcon != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(imageVector = trailingIcon, contentDescription = null, tint = TieyohBrandBlue, modifier = Modifier.size(18.dp))
+                }
             }
         } else {
             Text(text, color = TieyohBrandBlue, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)

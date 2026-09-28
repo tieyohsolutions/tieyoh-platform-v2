@@ -48,6 +48,12 @@ data class MerchantSelectionRequest(
     val merchantIds: List<Long>
 )
 
+// Body for both adding a merchant (targetAmount optional) and editing an
+// existing pick's target (null clears it).
+data class MerchantTargetRequest(
+    val targetAmount: Double? = null
+)
+
 data class IdAvailabilityResponse(
     val available: Boolean
 )
@@ -85,6 +91,25 @@ interface UserApi {
     suspend fun saveMerchantSelections(
         @Path("id") userId: Long,
         @Body request: MerchantSelectionRequest
+    )
+
+    // Additive -- backs "Add a merchant to your list" on My picks.
+    // Unlike saveMerchantSelections above, this never touches any other
+    // pick already on the list. Target is optional: a merchant can be
+    // added with no target and one set later via updateMerchantTarget.
+    @POST("api/users/{id}/merchants/{merchantId}")
+    suspend fun addMerchantToList(
+        @Path("id") userId: Long,
+        @Path("merchantId") merchantId: Long,
+        @Body request: MerchantTargetRequest = MerchantTargetRequest()
+    )
+
+    // Backs "Set target" / "Edit target" on an existing My picks entry.
+    @PATCH("api/users/{id}/merchants/{merchantId}/target")
+    suspend fun updateMerchantTarget(
+        @Path("id") userId: Long,
+        @Path("merchantId") merchantId: Long,
+        @Body request: MerchantTargetRequest
     )
 
     // Backs the invite screen's live search bar -- q can be a fragment of

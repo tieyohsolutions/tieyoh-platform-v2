@@ -44,13 +44,14 @@ import androidx.compose.ui.unit.sp
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandDarkBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavy
+import com.tieyoh.mobile.ui.theme.TieyohNavy
 import com.tieyoh.mobile.ui.theme.TieyohBrandNavyLight2
 import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
 import com.tieyoh.mobile.ui.theme.TieyohGiftRed
 import com.tieyoh.mobile.ui.theme.TieyohMuted
 import kotlinx.coroutines.launch
+import coil.compose.AsyncImage
 
-private const val MAX_MERCHANTS = 10
 
 // Formerly "Add merchants to your list" -- renamed and restyled to match
 // the "What places make you happy?" reference image: fonts, colors, and
@@ -59,22 +60,42 @@ private const val MAX_MERCHANTS = 10
 // search bar shown there, with "Use My Current Location" as the
 // alternate path. Underneath, this is still the exact same real search
 // (MerchantApi.searchMerchants) and save (UserApi.saveMerchantSelections)
-// this screen already did -- only the presentation changed. Two pieces
-// are NOT wired up yet, matching what was flagged when the mockup was
-// shown: the search box always searches by name only for now (typing an
-// address here doesn't yet filter by location -- the backend ANDs name/
-// zip/address together rather than ORing them, so the single combined
-// field can't safely populate both without a lot of false negatives);
-// and "Use My Current Location" doesn't request location permission or
-// read the device's GPS yet -- tapping it is a no-op placeholder until
-// that's built, the same way the contacts screen got its own permission
-// pre-prompt built separately from the list screen behind it.
+// this screen already did -- only the presentation changed. The single
+// search box covers name, full or partial address, city, and ZIP all at
+// once: the backend now ORs the query across name and every location
+// field (MerchantRepository.searchEligibleMerchants) rather than ANDing
+// them, so one combined field can safely search all four without false
+// negatives. "Use My Current Location" is still NOT wired up, matching
+// what was flagged when the mockup was shown -- it doesn't request
+// location permission or read the device's GPS yet, so tapping it is a
+// no-op placeholder until that's built, the same way the contacts screen
+// got its own permission pre-prompt built separately from the list
+// screen behind it.
 //
 // onBack has no clean destination of its own this deep in onboarding
 // (this step is reached from a top-level session state, not the nested
 // profile-setup flow the earlier back buttons live in) -- it defaults to
 // the same place Skip already goes, which is a judgment call flagged the
 // same way ChooseIdScreen's back arrow was, not a confirmed decision.
+// Per spec, only a Tieyoh-partnered merchant gets its logo shown in a
+// search result -- everyone else (the large majority of this general
+// registry) is represented by plain name alone, no icon.
+@Composable
+private fun MerchantLogoThumb(merchant: MerchantDto) {
+    if (merchant.partnered && !merchant.logoUrl.isNullOrBlank()) {
+        AsyncImage(
+            model = merchant.logoUrl,
+            contentDescription = merchant.brandName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(TieyohMuted.copy(alpha = 0.08f))
+        )
+        Spacer(Modifier.width(12.dp))
+    }
+}
+
 @Composable
 fun MerchantSelectionScreen(
     currentUser: AuthResponse,
@@ -82,7 +103,6 @@ fun MerchantSelectionScreen(
     onBack: () -> Unit = onDone
 ) {
     var searchText by remember { mutableStateOf("") }
-    var locationText by remember { mutableStateOf("") }
 
     var results by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
     var selected by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
@@ -95,18 +115,16 @@ fun MerchantSelectionScreen(
     val coroutineScope = rememberCoroutineScope()
 
     fun search() {
-        if (searchText.isBlank() && locationText.isBlank()) return
+        if (searchText.isBlank()) return
         coroutineScope.launch {
             isSearching = true
             hasSearched = true
             errorMessage = null
             try {
-                results = RetrofitClient.merchantApi.searchMerchants(
-                    name = searchText.trim().ifBlank { null },
-                    zip = null,
-                    address = locationText.trim().ifBlank { null },
-                    merchantType = null
-                )
+                // One combined query, OR'd server-side across name and
+                // every location field -- covers business name, full or
+                // partial address, city, and ZIP from this single box.
+                results = RetrofitClient.merchantApi.searchMerchants(q = searchText.trim())
             } catch (e: Exception) {
                 results = emptyList()
                 errorMessage = "Unable to search places right now."
@@ -117,13 +135,10 @@ fun MerchantSelectionScreen(
     }
 
     fun toggle(merchant: MerchantDto) {
+        // Open-ended for now -- no cap on how many merchants can be selected.
         selected = if (selected.any { it.id == merchant.id }) {
             selected.filterNot { it.id == merchant.id }
         } else {
-            if (selected.size >= MAX_MERCHANTS) {
-                errorMessage = "You can select up to $MAX_MERCHANTS places."
-                return
-            }
             selected + merchant
         }
     }
@@ -189,13 +204,19 @@ fun MerchantSelectionScreen(
                     .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
-                        tint = TieyohBrandNavy
+                        tint = TieyohNavy
                     )
                 }
+                Text(
+                    text = "People You May Know",
+                    color = TieyohNavy,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp
+                )
             }
 
             Spacer(Modifier.height(4.dp))
@@ -249,7 +270,7 @@ fun MerchantSelectionScreen(
             OutlinedTextField(
                 value = searchText,
                 onValueChange = { searchText = it },
-                placeholder = { Text("Search for a place or type an address...") },
+                placeholder = { Text("Search by name, address, city, or zip") },
                 singleLine = true,
                 leadingIcon = {
                     Icon(
@@ -262,6 +283,19 @@ fun MerchantSelectionScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { search() }),
                 colors = fieldColors,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            // Spelled out explicitly -- not obvious from the placeholder
+            // alone once it's scrolled out of view while typing that this
+            // one box covers all four.
+            Text(
+                text = "Try a business name like \"Starbucks,\" a full or partial street address, a city, or a ZIP code.",
+                fontSize = 12.sp,
+                color = TieyohBrandNavyLight2,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -323,7 +357,7 @@ fun MerchantSelectionScreen(
                         color = TieyohMuted
                     )
                     Text(
-                        text = "${selected.size}/$MAX_MERCHANTS selected",
+                        text = "${selected.size} selected",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = TieyohBrandNavy
@@ -360,6 +394,7 @@ fun MerchantSelectionScreen(
                                 colors = CheckboxDefaults.colors(checkedColor = TieyohBrandBlue)
                             )
                             Spacer(Modifier.width(8.dp))
+                            MerchantLogoThumb(merchant)
                             Column {
                                 Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohBrandNavy)
                                 merchant.category?.let {

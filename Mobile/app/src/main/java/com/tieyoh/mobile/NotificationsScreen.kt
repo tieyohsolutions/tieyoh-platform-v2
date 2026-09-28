@@ -144,13 +144,19 @@ fun NotificationsScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onDone) {
+            IconButton(onClick = onDone, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Feed",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(4.dp))

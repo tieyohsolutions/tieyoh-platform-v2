@@ -46,6 +46,22 @@ val TieyohBrandDarkBlue = Color(0xFF1E3A5F)
 // TieyohBrandDarkBlue above.
 val TieyohBrandNavyLight2 = Color(0xFF385D86)
 
+// "My Card" landing page (Sep 2026 redesign) -- soft tints for the card
+// face's background gradient, the "Choose how to pay" container, and the
+// two payment-option tiles (partnered-merchant QR vs. everywhere-else
+// prepaid card) and their icon circles. Deliberately separate from the
+// tile/button colors below (which reuse TieyohAccent/TieyohBlue) so the
+// tint values can be tuned for the card's light background without
+// touching those brand tokens used elsewhere in the app.
+val TieyohCardFaceStart = Color(0xFFFAFCFE)
+val TieyohCardFaceMid = Color(0xFFF0F6FC)
+val TieyohCardFaceEnd = Color(0xFFE9F2FC)
+val TieyohChooseHowBg = Color(0xFFEEF5FD)
+val TieyohMintTileBg = Color(0xFFEAFAF2)
+val TieyohMintIconBg = Color(0xFFD5F4E6)
+val TieyohBlueTileBg = Color(0xFFEAF3FD)
+val TieyohBlueIconBg = Color(0xFFD9E7FB)
+
 // Kept for reference / dark-theme fallback
 val Purple80 = Color(0xFFD0BCFF)
 val PurpleGrey80 = Color(0xFFCCC2DC)

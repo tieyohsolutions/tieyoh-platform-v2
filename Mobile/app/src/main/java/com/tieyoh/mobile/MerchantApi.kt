@@ -10,12 +10,41 @@ interface MerchantApi {
     @GET("api/merchants/mobile")
     suspend fun getMerchants(): List<MerchantDto>
 
+    // q is a single combined query OR'd server-side across the merchant's
+    // name and every location field (address, city, state, ZIP) -- see
+    // MerchantRepository.searchEligibleMerchants. merchantType is a
+    // separate, independent category filter, still ANDed in when present.
     @GET("api/merchants/mobile/search")
     suspend fun searchMerchants(
-        @Query("name") name: String? = null,
-        @Query("zip") zip: String? = null,
-        @Query("address") address: String? = null,
+        @Query("q") q: String? = null,
         @Query("merchantType") merchantType: String? = null
+    ): List<MerchantDto>
+
+    // Same single combined query as searchMerchants above, but only ever
+    // returns merchants that have signed up to accept scanned Tieyoh
+    // payment QR codes (MerchantRepository.searchEligiblePartneredMerchants)
+    // -- backs "Find Partnered Merchants" (PartneredMerchantSearchScreen.kt).
+    @GET("api/merchants/mobile/partnered/search")
+    suspend fun searchPartneredMerchants(
+        @Query("q") q: String? = null,
+        @Query("merchantType") merchantType: String? = null
+    ): List<MerchantDto>
+
+    @GET("api/merchants/mobile/nearby")
+    suspend fun getNearbyMerchants(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("radiusMiles") radiusMiles: Double = 25.0
+    ): List<MerchantDto>
+
+    // Same "near me" search as getNearbyMerchants above, restricted to
+    // partnered merchants -- backs the Map tab on "Find Partnered
+    // Merchants".
+    @GET("api/merchants/mobile/partnered/nearby")
+    suspend fun getNearbyPartneredMerchants(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("radiusMiles") radiusMiles: Double = 25.0
     ): List<MerchantDto>
 }
 

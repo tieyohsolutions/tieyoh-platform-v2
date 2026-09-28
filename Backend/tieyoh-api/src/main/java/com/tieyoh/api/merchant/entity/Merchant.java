@@ -38,6 +38,16 @@ public class Merchant {
     @Column(nullable = false)
     private String status = "ACTIVE";
 
+    // Whether this merchant has signed up to accept scanned Tieyoh payment
+    // QR codes (see PayWithQrScreen.kt's "Find Partnered Merchants" and
+    // MerchantRepository.searchEligiblePartneredMerchants /
+    // findNearbyPartnered). Separate from `status`: a merchant can be
+    // ACTIVE in the general registry (visible in ordinary merchant search,
+    // e.g. "Add a merchant to your list") without being partnered for QR
+    // payments yet -- most imported merchants start this way.
+    @Column(nullable = false)
+    private boolean partnered = false;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -143,6 +153,14 @@ public class Merchant {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public boolean isPartnered() {
+        return partnered;
+    }
+
+    public void setPartnered(boolean partnered) {
+        this.partnered = partnered;
     }
 
     public LocalDateTime getCreatedAt() {

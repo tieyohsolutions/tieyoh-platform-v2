@@ -122,13 +122,18 @@ fun ContactsInviteScreen(
         }
     }
 
-    // Only fall back to the Tieyoh-wide search once the circle itself is
-    // known to have nothing -- skips a network call for a name we can
-    // already answer locally.
-    LaunchedEffect(query, friendsLoaded, friends) {
+    // A live Tieyoh-wide search runs any time something's typed, even when
+    // the circle already has a match on that text -- a circle hit for one
+    // person (e.g. an already-added "Smith") says nothing about whether
+    // someone else shares that name, so it must never suppress the network
+    // fallback (that used to make a second same-name match disappear the
+    // moment the first one was added to the circle). Results already in
+    // the circle are filtered out below (visibleSearchResults) instead of
+    // skipped here, so adding someone never hides anyone else.
+    LaunchedEffect(query, friendsLoaded) {
         if (!friendsLoaded) return@LaunchedEffect
         val trimmed = query.trim()
-        if (trimmed.isEmpty() || circleMatches.isNotEmpty()) {
+        if (trimmed.isEmpty()) {
             isSearching = false
             searchCompletedForQuery = false
             searchResults = emptyList()
@@ -148,6 +153,13 @@ fun ContactsInviteScreen(
             isSearching = false
             searchCompletedForQuery = true
         }
+    }
+
+    // Search hits that are already in the circle (just added, or already
+    // a friend before this query even ran) -- excluded so "On Tieyoh"
+    // never offers a duplicate Invite for someone who's already there.
+    val visibleSearchResults = searchResults.filter { user ->
+        friends.none { it.contactUserId == user.id }
     }
 
     fun mergeFriend(result: FriendResult) {
@@ -337,13 +349,19 @@ fun ContactsInviteScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onDone) {
+            IconButton(onClick = onDone, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Feed",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -370,7 +388,7 @@ fun ContactsInviteScreen(
         )
 
         val noMatches = trimmedQuery.isNotEmpty() && circleMatches.isEmpty() &&
-            searchCompletedForQuery && searchResults.isEmpty()
+            searchCompletedForQuery && visibleSearchResults.isEmpty()
 
         if (trimmedQuery.isEmpty()) {
             // Nothing typed -- show the whole circle.
@@ -414,67 +432,78 @@ fun ContactsInviteScreen(
                     }
                 }
             }
-        } else if (circleMatches.isNotEmpty()) {
-            // Already in the circle -- active ones jump straight into the
-            // gift flow, pending ones explain they're not joined yet.
+        } else if (circleMatches.isNotEmpty() || isSearching || visibleSearchResults.isNotEmpty()) {
+            // Circle matches and live Tieyoh matches now render together in
+            // one scrollable list instead of one hiding the other -- an
+            // already-added circle member sharing a name (e.g. one of two
+            // "Smith"s) must never suppress the search that finds the
+            // other one.
             Spacer(modifier = Modifier.height(16.dp))
-            Text(text = "In your circle", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(circleMatches) { friend ->
-                    FriendRow(friend = friend, onClick = { onFriendTapped(friend) })
-                    Spacer(modifier = Modifier.height(8.dp))
+                if (circleMatches.isNotEmpty()) {
+                    // Already in the circle -- active ones jump straight
+                    // into the gift flow, pending ones explain they're not
+                    // joined yet.
+                    item {
+                        Text(text = "In your circle", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(circleMatches) { friend ->
+                        FriendRow(friend = friend, onClick = { onFriendTapped(friend) })
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                 }
-            }
-        } else if (isSearching) {
-            Spacer(modifier = Modifier.height(24.dp))
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = TieyohAccent)
-            }
-            Spacer(modifier = Modifier.weight(1f))
-        } else if (searchResults.isNotEmpty()) {
-            // Live matches found on Tieyoh but not yet in the circle -- tap
-            // "Invite" to add them.
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text = "On Tieyoh", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(searchResults) { user ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(TieyohCardBg)
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        SearchResultAvatar(
-                            profilePictureBase64 = user.profilePictureBase64,
-                            displayName = user.displayName
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = user.displayName, fontWeight = FontWeight.Bold, color = TieyohNavy)
-                            Text(
-                                text = user.tieyohId ?: (user.maskedPhone ?: user.maskedEmail ?: ""),
-                                color = TieyohMuted,
-                                fontSize = 12.sp
+                if (isSearching) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = TieyohAccent)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                } else if (visibleSearchResults.isNotEmpty()) {
+                    // Live matches found on Tieyoh but not yet in the
+                    // circle -- tap "Invite" to add them.
+                    item {
+                        Text(text = "On Tieyoh", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(visibleSearchResults) { user ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(TieyohCardBg)
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SearchResultAvatar(
+                                profilePictureBase64 = user.profilePictureBase64,
+                                displayName = user.displayName
                             )
-                            user.maskedEmail?.let { maskedEmail ->
-                                if (user.tieyohId != null) {
-                                    Text(text = maskedEmail, color = TieyohMuted, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = user.displayName, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                                Text(
+                                    text = user.tieyohId ?: (user.maskedPhone ?: user.maskedEmail ?: ""),
+                                    color = TieyohMuted,
+                                    fontSize = 12.sp
+                                )
+                                user.maskedEmail?.let { maskedEmail ->
+                                    if (user.tieyohId != null) {
+                                        Text(text = maskedEmail, color = TieyohMuted, fontSize = 12.sp)
+                                    }
                                 }
                             }
+                            // Inline in a search-result row -- same colors as
+                            // every other button, compact width to fit here.
+                            TieyohPrimaryButton(
+                                text = "Invite",
+                                onClick = { pendingConfirmUser = user },
+                                fillWidth = false
+                            )
                         }
-                        // Inline in a search-result row -- same colors as
-                        // every other button, compact width to fit here.
-                        TieyohPrimaryButton(
-                            text = "Invite",
-                            onClick = { pendingConfirmUser = user },
-                            fillWidth = false
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         } else if (noMatches) {
@@ -671,13 +700,19 @@ fun SendGiftPromptScreen(
                 .align(Alignment.TopStart),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Payment Methods",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Column(

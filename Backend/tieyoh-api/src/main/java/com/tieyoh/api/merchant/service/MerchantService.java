@@ -1,11 +1,13 @@
 package com.tieyoh.api.merchant.service;
 
+import com.tieyoh.api.merchant.dto.MerchantMobileResponse;
 import com.tieyoh.api.merchant.entity.Merchant;
 import com.tieyoh.api.merchant.repository.MerchantRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class MerchantService {
@@ -24,16 +26,31 @@ public class MerchantService {
         return merchantRepository.findAllWithParentMerchant();
     }
 
+    // query is a single combined search string, OR'd server-side across
+    // the merchant's name and every location field (see
+    // MerchantRepository.searchEligibleMerchants) -- the caller doesn't
+    // need to know in advance whether it's a business name, an address,
+    // a city, or a ZIP. merchantType stays a separate, independently
+    // ANDed category filter.
     public List<Merchant> searchEligibleMerchants(
-            String name,
-            String zip,
-            String address,
+            String query,
             String merchantType) {
 
         return merchantRepository.searchEligibleMerchants(
-                normalize(name),
-                normalize(zip),
-                normalizeAddress(address),
+                normalizeQuery(query),
+                normalize(merchantType)
+        );
+    }
+
+    // Same as searchEligibleMerchants, restricted to merchants that have
+    // signed up to accept scanned Tieyoh payment QR codes -- backs "Find
+    // Partnered Merchants" (PartneredMerchantSearchScreen.kt).
+    public List<Merchant> searchEligiblePartneredMerchants(
+            String query,
+            String merchantType) {
+
+        return merchantRepository.searchEligiblePartneredMerchants(
+                normalizeQuery(query),
                 normalize(merchantType)
         );
     }
@@ -80,6 +97,56 @@ public class MerchantService {
                 });
     }
 
+    // Flags (or unflags) a merchant as partnered -- i.e. that it has
+    // signed up to accept scanned Tieyoh payment QR codes. This is
+    // currently the only way anywhere in the app or database to set that
+    // flag; there's no admin UI for it yet, just this endpoint
+    // (MerchantController PATCH /{id}/partner and /{id}/unpartner).
+    public Optional<Merchant> setPartnered(Long id, boolean partnered) {
+
+        return merchantRepository.findById(id)
+                .map(merchant -> {
+                    merchant.setPartnered(partnered);
+                    return merchantRepository.save(merchant);
+                });
+    }
+
+    // "Near me" in the Add-a-merchant flow -- distance from the device's
+    // current GPS position, computed against the latitude/longitude
+    // already stored on each merchant's location. No map rendering or
+    // geocoding involved, just the coordinates already on file.
+    public List<MerchantMobileResponse> getNearbyMerchants(double lat, double lng, double radiusMiles) {
+        return merchantRepository.findNearby(lat, lng, radiusMiles)
+                .stream()
+                .map(this::toNearbyResponse)
+                .collect(Collectors.toList());
+    }
+
+    // Same "near me" search, restricted to partnered merchants -- backs
+    // the Map tab on "Find Partnered Merchants".
+    public List<MerchantMobileResponse> getNearbyPartneredMerchants(double lat, double lng, double radiusMiles) {
+        return merchantRepository.findNearbyPartnered(lat, lng, radiusMiles)
+                .stream()
+                .map(this::toNearbyResponse)
+                .collect(Collectors.toList());
+    }
+
+    private MerchantMobileResponse toNearbyResponse(MerchantRepository.MerchantWithDistance row) {
+        MerchantMobileResponse response = new MerchantMobileResponse();
+        response.setId(row.getId());
+        response.setTmid(row.getTmid());
+        response.setBrandName(row.getBrandName());
+        response.setLogoUrl(row.getLogoUrl());
+        response.setCategory(row.getCategory());
+        response.setStatus(row.getStatus());
+        response.setPartnered(row.getPartnered());
+        response.setPmid(row.getPmid());
+        response.setDistanceMiles(row.getDistanceMiles());
+        response.setLatitude(row.getLatitude());
+        response.setLongitude(row.getLongitude());
+        return response;
+    }
+
     private String normalize(String value) {
         if (value == null || value.isBlank()) {
             return null;
@@ -87,7 +154,11 @@ public class MerchantService {
         return value.trim();
     }
 
-    private String normalizeAddress(String value) {
+    // Same light cleanup the old address-only search used (trim, drop
+    // commas, collapse repeated whitespace) -- now applied to the single
+    // combined query since it's matched against address fields too, not
+    // just the merchant name.
+    private String normalizeQuery(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }

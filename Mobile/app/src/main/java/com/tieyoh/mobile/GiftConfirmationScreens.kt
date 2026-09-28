@@ -166,13 +166,19 @@ private fun GiftConfirmationScaffold(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBackToFeed) {
+            IconButton(onClick = onBackToFeed, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = "Back",
                     tint = TieyohNavy
                 )
             }
+            Text(
+                text = "Feed",
+                color = TieyohNavy,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
         }
 
         Spacer(Modifier.height(16.dp))

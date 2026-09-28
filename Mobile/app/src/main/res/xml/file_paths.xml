@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backs the FileProvider declared in AndroidManifest.xml. The images/
+     sub-folder of this app's cache dir is the only location exposed
+     through it, used for the QR code PNG written out just before sharing
+     or copying it (see PayWithQrScreen.kt's qrImageUriFor). -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="shared_images" path="images/" />
+</paths>

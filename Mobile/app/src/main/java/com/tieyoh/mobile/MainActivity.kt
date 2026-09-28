@@ -1,6 +1,12 @@
 package com.tieyoh.mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
+import android.provider.Settings
+import android.util.Log as AndroidLog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -8,6 +14,18 @@ import android.os.Bundle
 import android.text.format.DateUtils
 import android.util.Base64
 import android.widget.Toast
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
+import coil.compose.AsyncImage
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +36,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +45,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -39,17 +60,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -59,10 +90,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import com.tieyoh.mobile.ui.theme.TieyohAccent
 import com.tieyoh.mobile.ui.theme.TieyohBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
+import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
+import com.tieyoh.mobile.ui.theme.TieyohCardFaceStart
+import com.tieyoh.mobile.ui.theme.TieyohCardFaceMid
+import com.tieyoh.mobile.ui.theme.TieyohCardFaceEnd
+import com.tieyoh.mobile.ui.theme.TieyohChooseHowBg
+import com.tieyoh.mobile.ui.theme.TieyohMintTileBg
+import com.tieyoh.mobile.ui.theme.TieyohMintIconBg
+import com.tieyoh.mobile.ui.theme.TieyohBlueTileBg
+import com.tieyoh.mobile.ui.theme.TieyohBlueIconBg
 import com.tieyoh.mobile.ui.theme.TieyohBorder
+import com.tieyoh.mobile.ui.theme.TieyohBrandDarkBlue
 import com.tieyoh.mobile.ui.theme.TieyohCardBg
 import com.tieyoh.mobile.ui.theme.TieyohGiftRed
 import com.tieyoh.mobile.ui.theme.TieyohMuted
@@ -78,6 +120,7 @@ import com.tieyoh.mobile.ui.theme.TieyohTheme
 import com.tieyoh.mobile.ui.theme.TieyohTrack
 import com.google.gson.Gson
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import retrofit2.HttpException
 import java.time.LocalDate
 
@@ -550,7 +593,8 @@ class MainActivity : FragmentActivity() {
                             },
                             onDone = {
                                 sessionState = SessionState.NeedsSendGiftSetup(state.user)
-                            }
+                            },
+                            backLabel = "Merchant Selection"
                         )
                     }
 
@@ -792,19 +836,17 @@ private enum class TieyohScreen {
     GIFT_RECEIVED,
     CONFIRM_CONNECTION,
     ALL_CIRCLE,
-    MY_QR_CODE
+    MY_QR_CODE,
+    PAY_WITH_QR,
+    PAY_WITH_CARD,
+    PARTNERED_MERCHANT_SEARCH,
+    WALLET_OVERVIEW
 }
 
 private data class WishTarget(
     val merchant: String,
     val current: Int,
     val goal: Int
-)
-
-private data class MerchantAllocation(
-    val merchant: String,
-    val amount: Double,
-    val isTieyohMerchant: Boolean = true
 )
 
 @Composable
@@ -822,6 +864,10 @@ fun TieyohApp(
     // screen) is currently sending a gift to -- set right before jumping
     // into SEND_GIFT so that screen can show who it's for.
     var giftRecipient by remember { mutableStateOf<FriendResult?>(null) }
+    // Tracks which screen "View My QR Code" was opened from (Profile or
+    // My Card) so the QR screen's back button returns there instead of
+    // always going to Profile.
+    var qrCodeOrigin by remember { mutableStateOf(TieyohScreen.PROFILE) }
     // The merchant chosen (either from the recipient's favorites or via the
     // 'Other' round trip through SEND_GIFT_MERCHANT_SEARCH) for the gift
     // currently being composed in SEND_GIFT.
@@ -906,7 +952,7 @@ fun TieyohApp(
                 // Reserving that space once, here, for every screen is
                 // the actual fix, instead of patching each screen's own
                 // bottom spacing one at a time as this keeps coming up.
-                .padding(bottom = 48.dp),
+                .padding(bottom = 52.dp),
             color = MaterialTheme.colorScheme.background
         ) {
 
@@ -993,9 +1039,21 @@ fun TieyohApp(
                     )
                 }
 
-                TieyohScreen.MY_LIST -> MyListScreen()
+                TieyohScreen.MY_LIST -> MyListScreen(currentUser = currentUser)
 
-                TieyohScreen.MY_CARD -> MyCardScreen()
+                TieyohScreen.MY_CARD -> MyCardScreen(
+                    currentUser = currentUser,
+                    onNavigateToPayWithQr = { currentScreen = TieyohScreen.PAY_WITH_QR },
+                    onNavigateToPayWithCard = { currentScreen = TieyohScreen.PAY_WITH_CARD },
+                    onNavigateToWalletOverview = { currentScreen = TieyohScreen.WALLET_OVERVIEW }
+                )
+
+                TieyohScreen.WALLET_OVERVIEW -> {
+                    WalletOverviewScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.MY_CARD }
+                    )
+                }
 
                 TieyohScreen.SEND_GIFT -> {
                     val recipient = giftRecipient
@@ -1035,7 +1093,8 @@ fun TieyohApp(
                             giftMerchant = merchant
                             currentScreen = TieyohScreen.SEND_GIFT
                         },
-                        onBack = { currentScreen = TieyohScreen.SEND_GIFT }
+                        onBack = { currentScreen = TieyohScreen.SEND_GIFT },
+                        backLabel = "Send a Gift"
                     )
                 }
 
@@ -1054,14 +1113,43 @@ fun TieyohApp(
                     onManagePaymentMethods = { currentScreen = TieyohScreen.PAYMENT_METHODS },
                     onEditProfile = { currentScreen = TieyohScreen.EDIT_PROFILE },
                     onPrivacySettings = { currentScreen = TieyohScreen.PRIVACY_SETTINGS },
-                    onViewQrCode = { currentScreen = TieyohScreen.MY_QR_CODE },
+                    onViewQrCode = {
+                        qrCodeOrigin = TieyohScreen.PROFILE
+                        currentScreen = TieyohScreen.MY_QR_CODE
+                    },
                     onProfileUpdated = onUserUpdated
                 )
 
                 TieyohScreen.MY_QR_CODE -> {
                     MyQrCodeScreen(
                         currentUser = currentUser,
-                        onBack = { currentScreen = TieyohScreen.PROFILE }
+                        onBack = { currentScreen = qrCodeOrigin }
+                    )
+                }
+
+                TieyohScreen.PAY_WITH_QR -> {
+                    PayWithQrScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.MY_CARD },
+                        onFindMerchants = { currentScreen = TieyohScreen.PARTNERED_MERCHANT_SEARCH }
+                    )
+                }
+
+                TieyohScreen.PAY_WITH_CARD -> {
+                    PayWithCardScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.MY_CARD }
+                    )
+                }
+
+                TieyohScreen.PARTNERED_MERCHANT_SEARCH -> {
+                    // Its own dedicated screen (not the generic
+                    // MerchantSearchScreen used elsewhere) -- it needs the
+                    // Search/Map toggle and only ever calls the
+                    // partnered-only search/nearby endpoints, never the
+                    // general merchant registry search.
+                    PartneredMerchantSearchScreen(
+                        onBack = { currentScreen = TieyohScreen.MY_CARD }
                     )
                 }
 
@@ -1241,14 +1329,18 @@ private fun TieyohWebsiteScreen(
                 .padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onDone, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TieyohNavy
+                )
+            }
             Text(
-                "←",
-                fontSize = 20.sp,
+                text = "Feed",
                 color = TieyohNavy,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .clickable { onDone() }
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
             )
         }
 
@@ -1432,23 +1524,23 @@ private fun TieyohBottomBar(
                 screen = TieyohScreen.MY_LIST,
                 currentScreen = currentScreen,
                 onNavigate = onNavigate,
-                glyph = "☰",
-                label = "My list"
+                icon = { color -> NavListGlyph(color = color, size = 22.dp) },
+                label = "My Picks"
             )
 
             TieyohNavItem(
                 screen = TieyohScreen.MY_CARD,
                 currentScreen = currentScreen,
                 onNavigate = onNavigate,
-                glyph = "▭",
-                label = "My card"
+                icon = { color -> NavCardGlyph(color = color, size = 22.dp) },
+                label = "My Card"
             )
 
             TieyohNavItem(
                 screen = TieyohScreen.PROFILE,
                 currentScreen = currentScreen,
                 onNavigate = onNavigate,
-                glyph = "◔",
+                icon = { color -> NavProfileGlyph(color = color, size = 22.dp) },
                 label = "Profile"
             )
         }
@@ -1457,8 +1549,8 @@ private fun TieyohBottomBar(
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = (-38).dp)
-                .size(80.dp)
+                .offset(y = (-41.8).dp)
+                .size(88.dp)
                 .clickable { onSendClick() }
         ) {
             Image(
@@ -1483,23 +1575,24 @@ private fun TieyohBottomBar(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(76.dp)
+                .height(83.6.dp)
                 .align(Alignment.TopCenter)
-                .offset(y = (-40).dp)
+                .offset(y = (-44).dp)
         ) {
-            val leftPad = 22.dp.toPx()
-            val rightPad = 22.dp.toPx()
-            val baseline = 56.dp.toPx()
+            val leftPad = 24.2.dp.toPx()
+            val rightPad = 24.2.dp.toPx()
+            val baseline = 61.6.dp.toPx()
             val centerX = size.width / 2f
-            // Measured from ic_send_fab.png: the visible black-bordered
-            // circle sits almost dead-center of the 80.dp FAB box with a
-            // ~35.dp radius (44% of the 80.dp box).
-            val ringCenterY = 41.dp.toPx()
-            val ringRadius = 35.dp.toPx()
+            // Measured from ic_send_fab.png at its original 80.dp size
+            // (center ~41.dp / radius ~35.dp, 44% of the box), then scaled
+            // by the same 1.1x the FAB box grew by (80.dp -> 88.dp) so the
+            // arc still lands exactly on the icon's real edge.
+            val ringCenterY = 45.1.dp.toPx()
+            val ringRadius = 38.5.dp.toPx()
             // Small rounded "drop" at each tip of the line instead of a
             // flat stroke-cap ending.
-            val hookRun = 10.dp.toPx()
-            val hookDrop = 12.dp.toPx()
+            val hookRun = 11.dp.toPx()
+            val hookDrop = 13.2.dp.toPx()
 
             // Find where the icon's TRUE circle (same measured radius)
             // crosses the flat baseline height, below the circle's own
@@ -1566,13 +1659,20 @@ private fun RowScope.TieyohNavItem(
     screen: TieyohScreen,
     currentScreen: TieyohScreen,
     onNavigate: (TieyohScreen) -> Unit,
-    glyph: String,
+    glyph: String? = null,
+    icon: (@Composable (Color) -> Unit)? = null,
     label: String
 ) {
     NavigationBarItem(
         selected = currentScreen == screen,
         onClick = { onNavigate(screen) },
-        icon = { Text(glyph, fontSize = 20.sp) },
+        icon = {
+            if (icon != null) {
+                icon(LocalContentColor.current)
+            } else {
+                Text(glyph.orEmpty(), fontSize = 20.sp)
+            }
+        },
         label = { Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp) },
         colors = NavigationBarItemDefaults.colors(
             selectedIconColor = TieyohAccent,
@@ -1582,6 +1682,88 @@ private fun RowScope.TieyohNavItem(
             indicatorColor = Color.Transparent
         )
     )
+}
+
+// -- Bottom nav glyphs -------------------------------------------------
+// Hand-drawn with Canvas, same convention as every other custom icon in
+// this file (QrCodeGlyph, VirtualCardGlyph, etc.) rather than a Material
+// ImageVector, so the bottom bar keeps drawing its own icons instead of
+// mixing in a different icon language. Shapes were matched from the
+// reference images the product owner sent for this pass (a credit card
+// for My Card, a person-in-a-circle for Profile, list rows for My
+// picks) -- Feed's original glyph ("▤") is untouched since no reference
+// was given for it. `color` is driven by LocalContentColor from
+// TieyohNavItem above, so these automatically switch between
+// TieyohAccent (selected) and TieyohNavInactive (unselected) exactly
+// like the unicode glyphs did.
+@Composable
+private fun NavCardGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val strokeW = 1.8f * s
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(2f * s, 5f * s),
+            size = Size(20f * s, 14f * s),
+            cornerRadius = CornerRadius(3f * s, 3f * s),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // Magnetic-stripe bar near the top of the card face.
+        drawLine(
+            color = color,
+            start = Offset(2f * s, 10f * s),
+            end = Offset(22f * s, 10f * s),
+            strokeWidth = 2.2f * s,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+private fun NavProfileGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val strokeW = 1.8f * s
+        val center = Offset(12f * s, 12f * s)
+        val ringRadius = 10f * s
+        // Outer ring, then head + shoulders clipped to it so the
+        // shoulder arc's flat top edge doesn't poke outside the circle.
+        drawCircle(color = color, radius = ringRadius, center = center, style = Stroke(width = strokeW))
+        clipPath(Path().apply { addOval(Rect(center = center, radius = ringRadius - strokeW / 2f)) }) {
+            drawCircle(color = color, radius = 3.3f * s, center = Offset(12f * s, 9.6f * s))
+            drawArc(
+                color = color,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = Offset(12f * s - 6.4f * s, 13.4f * s),
+                size = Size(12.8f * s, 10f * s)
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavListGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val rowYs = listOf(6.5f, 12f, 17.5f)
+        rowYs.forEach { y ->
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(2f * s, (y - 1.5f) * s),
+                size = Size(3f * s, 3f * s),
+                cornerRadius = CornerRadius(0.8f * s, 0.8f * s)
+            )
+            drawLine(
+                color = color,
+                start = Offset(8f * s, y * s),
+                end = Offset(22f * s, y * s),
+                strokeWidth = 2f * s,
+                cap = StrokeCap.Round
+            )
+        }
+    }
 }
 
 // Sample social-feed content. There's no feed backend yet, so this stands
@@ -2150,7 +2332,7 @@ private fun GiftActivityCard(
 // single first-letter initial instead; this is deliberately the one spot
 // that mimics the old two-letter style since that's the card being
 // restored here).
-private fun personInitials(displayName: String): String {
+internal fun personInitials(displayName: String): String {
     val words = displayName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
     return words.take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("")
         .ifBlank { "?" }
@@ -2272,14 +2454,19 @@ private fun AllCircleScreen(
                 .padding(top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TieyohNavy
+                )
+            }
             Text(
-                text = "←",
-                fontSize = 20.sp,
+                text = "Feed",
                 color = TieyohNavy,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clickable { onBack() }
-                    .padding(end = 12.dp)
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(end = 16.dp)
             )
             Text(
                 text = "Your circle",
@@ -2442,7 +2629,13 @@ private fun AddCircleChip(onClick: () -> Unit) {
 }
 
 @Composable
-private fun NetworkAvatar(profilePictureBase64: String?, displayName: String, dimmed: Boolean = false) {
+private fun NetworkAvatar(
+    profilePictureBase64: String?,
+    displayName: String,
+    dimmed: Boolean = false,
+    size: androidx.compose.ui.unit.Dp = 56.dp,
+    modifier: Modifier = Modifier
+) {
     val bitmap = remember(profilePictureBase64) {
         profilePictureBase64?.let {
             try {
@@ -2455,8 +2648,8 @@ private fun NetworkAvatar(profilePictureBase64: String?, displayName: String, di
     }
 
     Box(
-        modifier = Modifier
-            .size(56.dp)
+        modifier = modifier
+            .size(size)
             .clip(CircleShape)
             .background(TieyohAccent.copy(alpha = if (dimmed) 0.08f else 0.15f)),
         contentAlignment = Alignment.Center
@@ -2473,7 +2666,7 @@ private fun NetworkAvatar(profilePictureBase64: String?, displayName: String, di
                 text = displayName.firstOrNull()?.uppercase() ?: "?",
                 color = if (dimmed) TieyohMuted else TieyohAccent,
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                fontSize = (size.value * 0.32f).sp
             )
         }
     }
@@ -2612,14 +2805,55 @@ private fun TransactionCard(
     }
 }
 
-@Composable
-private fun MyListScreen() {
+private enum class PicksSortOption(val label: String) {
+    NAME("Name (A-Z)"),
+    TARGET("Highest target"),
+    RECEIVED("Highest received")
+}
 
-    val wishTargets = listOf(
-        WishTarget("Blue Bottle Coffee", 55, 100),
-        WishTarget("Whole Foods", 20, 50),
-        WishTarget("AMC Theatres", 0, 40)
-    )
+private fun formatPickAmount(value: Double): String {
+    return if (value == value.toLong().toDouble()) {
+        value.toLong().toString()
+    } else {
+        String.format("%.2f", value)
+    }
+}
+
+@Composable
+private fun MyListScreen(currentUser: AuthResponse) {
+
+    var picks by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var sortOption by remember { mutableStateOf(PicksSortOption.NAME) }
+    var showAddSheet by remember { mutableStateOf(false) }
+    var editingTarget by remember { mutableStateOf<MerchantDto?>(null) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    suspend fun reload() {
+        try {
+            picks = RetrofitClient.userApi.getMerchantSelections(currentUser.id)
+            loadError = null
+        } catch (e: Exception) {
+            loadError = "Couldn't load your picks right now."
+        } finally {
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(currentUser.id) {
+        isLoading = true
+        reload()
+    }
+
+    val sortedPicks = remember(picks, sortOption) {
+        when (sortOption) {
+            PicksSortOption.NAME -> picks.sortedBy { it.brandName.lowercase() }
+            PicksSortOption.TARGET -> picks.sortedByDescending { it.targetAmount ?: -1.0 }
+            PicksSortOption.RECEIVED -> picks.sortedByDescending { it.amountReceived ?: 0.0 }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2630,179 +2864,1423 @@ private fun MyListScreen() {
     ) {
 
         item {
-            Text("My list", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
+            Text("My Picks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Up to 10 merchants you'd love a gift from. Set a wish target and your circle can chip in toward it — no payment method needed to set one.",
+                "Merchants you'd love a gift from. Set a wish target and your circle can chip in toward it.",
                 color = TieyohMuted
+            )
+            Spacer(Modifier.height(16.dp))
+            TieyohPrimaryButton(
+                text = "+ Add a merchant to your list",
+                onClick = { showAddSheet = true }
             )
         }
 
-        items(wishTargets) { target ->
-            Column(
+        when {
+            isLoading -> item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = TieyohAccent)
+                }
+            }
+
+            loadError != null -> item {
+                Text(loadError.orEmpty(), color = TieyohGiftRed, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
+
+            picks.isEmpty() -> item {
+                Text(
+                    "You haven't added any picks yet. Tap \"Add a merchant\" above to get started.",
+                    color = TieyohMuted,
+                    fontSize = 14.sp
+                )
+            }
+
+            else -> {
+                item {
+                    Column {
+                        Text("Sort by", fontSize = 12.sp, color = TieyohMuted, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PicksSortOption.values().forEach { option ->
+                                val isActive = option == sortOption
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isActive) TieyohAccent else Color.Transparent)
+                                        .border(1.dp, TieyohAccent, RoundedCornerShape(12.dp))
+                                        .clickable { sortOption = option }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        option.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isActive) Color.White else TieyohAccent
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(sortedPicks, key = { it.id }) { pick ->
+                    MerchantPickCard(
+                        pick = pick,
+                        onEditTarget = { editingTarget = pick }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAddSheet) {
+        AddMerchantSheet(
+            currentUser = currentUser,
+            existingIds = picks.map { it.id }.toSet(),
+            onDismiss = { showAddSheet = false },
+            onAdded = {
+                showAddSheet = false
+                coroutineScope.launch { reload() }
+            }
+        )
+    }
+
+    editingTarget?.let { pick ->
+        TargetEditDialog(
+            merchantName = pick.brandName,
+            currentTarget = pick.targetAmount,
+            onDismiss = { editingTarget = null },
+            onSave = { newTarget ->
+                coroutineScope.launch {
+                    try {
+                        RetrofitClient.userApi.updateMerchantTarget(
+                            userId = currentUser.id,
+                            merchantId = pick.id,
+                            request = MerchantTargetRequest(targetAmount = newTarget)
+                        )
+                        editingTarget = null
+                        reload()
+                    } catch (e: Exception) {
+                        // Leave the dialog open with what they typed rather
+                        // than silently discarding it -- no toast/error
+                        // surface wired up here yet.
+                    }
+                }
+            }
+        )
+    }
+}
+
+// One pick's card -- shows real progress (amountReceived, derived from
+// completed gifts) against the target once one is set, or an invitation
+// to set one when it isn't. The pill in the top-right is the only
+// difference between those two states: "Edit target" (outline) vs.
+// "Set target" (filled), both opening the same TargetEditDialog.
+// Per spec, only a Tieyoh-partnered merchant gets its logo shown in a
+// search or list row -- everyone else is represented by plain name
+// alone, no icon. Shared here across MerchantPickCard, AddMerchantSheet's
+// results, and MerchantResultCard (below) rather than duplicated three
+// times, since all three live in this same file.
+@Composable
+private fun MerchantLogoThumb(merchant: MerchantDto) {
+    if (merchant.partnered && !merchant.logoUrl.isNullOrBlank()) {
+        AsyncImage(
+            model = merchant.logoUrl,
+            contentDescription = merchant.brandName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(TieyohMuted.copy(alpha = 0.08f))
+        )
+        Spacer(Modifier.width(12.dp))
+    }
+}
+
+@Composable
+private fun MerchantPickCard(pick: MerchantDto, onEditTarget: () -> Unit) {
+    val target = pick.targetAmount
+    val hasTarget = target != null && target > 0
+    val received = pick.amountReceived ?: 0.0
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top
+        ) {
+            MerchantLogoThumb(pick)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(pick.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
+                pick.category?.let {
+                    Text(it, fontSize = 12.sp, color = TieyohMuted)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(15.dp))
+                    .then(
+                        if (hasTarget) {
+                            Modifier.border(1.5.dp, TieyohAccent, RoundedCornerShape(15.dp))
+                        } else {
+                            Modifier.background(TieyohAccent)
+                        }
+                    )
+                    .clickable { onEditTarget() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    if (hasTarget) "✎ Edit target" else "+ Set target",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasTarget) TieyohAccent else Color.White
+                )
+            }
+        }
+
+        if (hasTarget && target != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("\$${formatPickAmount(received)}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                Text(" / \$${formatPickAmount(target)}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(TieyohCardBg)
-                    .padding(18.dp)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(TieyohTrack)
             ) {
-                Text(target.merchant, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("\$${target.current}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
-                    Text(" / \$${target.goal}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
-                }
-                Spacer(Modifier.height(8.dp))
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
+                        .fillMaxWidth(
+                            if (target > 0) (received / target).toFloat().coerceIn(0f, 1f) else 0f
+                        )
+                        .fillMaxHeight()
                         .clip(RoundedCornerShape(6.dp))
-                        .background(TieyohTrack)
+                        .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
+                )
+            }
+        } else {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "No wish target set yet — tap \"Set target\" to add one anytime.",
+                fontSize = 13.sp,
+                color = TieyohMuted
+            )
+        }
+    }
+}
+
+// Shared by "Set target" (currentTarget == null) and "Edit target"
+// (currentTarget != null) -- same dialog, the title and starting value
+// are the only difference.
+@Composable
+private fun TargetEditDialog(
+    merchantName: String,
+    currentTarget: Double?,
+    onDismiss: () -> Unit,
+    onSave: (Double?) -> Unit
+) {
+    var amountText by remember {
+        mutableStateOf(currentTarget?.let { formatPickAmount(it) } ?: "")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (currentTarget != null) "Edit target" else "Set target",
+                fontWeight = FontWeight.Bold,
+                color = TieyohNavy
+            )
+        },
+        text = {
+            Column {
+                Text(merchantName, color = TieyohMuted, fontSize = 13.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { input -> amountText = input.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Wish target") },
+                    prefix = { Text("$") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(amountText.toDoubleOrNull()) }) {
+                Text("Save", color = TieyohAccent, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TieyohMuted)
+            }
+        }
+    )
+}
+
+// The "Add a merchant to your list" flow from My picks -- a single search
+// + select step, same real search MerchantSelectionScreen uses, but
+// additive (RetrofitClient.userApi.addMerchantToList) so it never touches
+// any other pick already on the list. A wish target is optional here: it
+// can be set in this same step, or skipped and added later from the
+// "Set target" pill on the new card.
+//
+// Search mode's single field covers business name, full or partial street
+// address, city, and ZIP all in one box -- the backend ORs the query
+// across name and every location field (MerchantRepository.
+// searchEligibleMerchants) instead of the caller having to pick a field
+// first, so "Starbucks", "123 Main St", "St. Louis", and "63101" all work
+// from the same input. Map mode stays separate since it's a different
+// interaction (browse/pan a map), not a text query.
+private enum class MerchantSearchMode(val label: String) {
+    SEARCH("Search"),
+    MAP("Map")
+}
+
+private fun formatDistance(miles: Double): String {
+    return if (miles < 0.1) "Nearby" else "%.1f mi away".format(miles)
+}
+
+@Composable
+private fun AddMerchantSheet(
+    currentUser: AuthResponse,
+    existingIds: Set<Long>,
+    onDismiss: () -> Unit,
+    onAdded: () -> Unit
+) {
+    val context = LocalContext.current
+    var searchMode by remember { mutableStateOf(MerchantSearchMode.SEARCH) }
+    var searchText by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<MerchantDto>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<MerchantDto?>(null) }
+    var targetText by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var locationServicesDisabled by remember { mutableStateOf(false) }
+    var hasLocationPermission by remember { mutableStateOf(false) }
+    // Map mode's own map/list sub-toggle -- "user can switch from a map to
+    // a list and see all merchants in the area."
+    var showMapView by remember { mutableStateOf(true) }
+    var showSearchThisArea by remember { mutableStateOf(false) }
+    var lastSearchedCenter by remember { mutableStateOf<LatLng?>(null) }
+    val cameraPositionState = rememberCameraPositionState()
+
+    val coroutineScope = rememberCoroutineScope()
+
+    fun isLocationEnabled(): Boolean {
+        val locationManager = context.getSystemService(LocationManager::class.java)
+        return locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true ||
+                locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true
+    }
+
+    // Shared by both "locate me" (fetchNearby, below) and the map's
+    // "Search this area" button -- the only difference is whether the
+    // camera should jump to the new center or stay put because the user
+    // just put it there themselves by panning.
+    suspend fun fetchNearbyAt(lat: Double, lng: Double, moveCamera: Boolean) {
+        isSearching = true
+        hasSearched = true
+        errorMessage = null
+        try {
+            results = RetrofitClient.merchantApi.getNearbyMerchants(lat = lat, lng = lng)
+            lastSearchedCenter = LatLng(lat, lng)
+            showSearchThisArea = false
+            if (moveCamera) {
+                cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(lat, lng), 14f)
+            }
+        } catch (e: Exception) {
+            AndroidLog.e("AddMerchantSheet", "Failed to fetch nearby merchants", e)
+            results = emptyList()
+            errorMessage = "Unable to find merchants near you right now."
+        } finally {
+            isSearching = false
+        }
+    }
+
+    fun switchMode(mode: MerchantSearchMode) {
+        if (searchMode == mode) return
+        searchMode = mode
+        searchText = ""
+        results = emptyList()
+        hasSearched = false
+        selected = null
+        errorMessage = null
+        locationServicesDisabled = false
+        showSearchThisArea = false
+        lastSearchedCenter = null
+        if (mode == MerchantSearchMode.MAP) {
+            showMapView = true
+        }
+    }
+
+    fun search() {
+        if (searchText.isBlank()) return
+        coroutineScope.launch {
+            isSearching = true
+            hasSearched = true
+            errorMessage = null
+            try {
+                // One combined query, OR'd server-side across name and
+                // every location field -- no more guessing which mode a
+                // typed string belongs to.
+                results = RetrofitClient.merchantApi.searchMerchants(q = searchText.trim())
+            } catch (e: Exception) {
+                results = emptyList()
+                errorMessage = "Unable to search places right now."
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
+    fun fetchNearby() {
+        // Checked up front so a device with Location switched off entirely
+        // (common on a fresh emulator, but a real possibility for real
+        // users too) gets a direct link to the right settings screen
+        // instead of a generic "couldn't find your location" dead end --
+        // the fused client would otherwise just return null with no way
+        // to tell "off" apart from "no fix yet".
+        if (!isLocationEnabled()) {
+            hasSearched = true
+            results = emptyList()
+            locationServicesDisabled = true
+            errorMessage = "Location is turned off on this device."
+            return
+        }
+        locationServicesDisabled = false
+
+        val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+        coroutineScope.launch {
+            isSearching = true
+            hasSearched = true
+            errorMessage = null
+            try {
+                // lastLocation resolves immediately from whatever fix the provider
+                // already has -- on an emulator, that's exactly what Extended
+                // Controls' "Set location" just pushed. getCurrentLocation asks
+                // for a brand-new fix instead, which can sit unresolved on an
+                // emulator's simulated GPS provider even after a location has
+                // been set, so it's only the fallback here, not the primary path.
+                var location = try {
+                    fusedClient.lastLocation.await()
+                } catch (e: Exception) {
+                    AndroidLog.w("AddMerchantSheet", "lastLocation failed, falling back to getCurrentLocation", e)
+                    null
+                }
+
+                if (location == null) {
+                    location = fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+                }
+
+                if (location == null) {
+                    results = emptyList()
+                    errorMessage = "Couldn't get your location -- make sure location is turned on."
+                    isSearching = false
+                } else {
+                    fetchNearbyAt(location.latitude, location.longitude, moveCamera = true)
+                }
+            } catch (e: Exception) {
+                AndroidLog.e("AddMerchantSheet", "Failed to fetch nearby merchants", e)
+                results = emptyList()
+                errorMessage = "Unable to find merchants near you right now."
+                isSearching = false
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasLocationPermission = granted
+        if (granted) {
+            fetchNearby()
+        } else {
+            errorMessage = "Location permission is needed to find merchants near you."
+        }
+    }
+
+    fun useMyLocation() {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        hasLocationPermission = hasPermission
+
+        if (hasPermission) {
+            fetchNearby()
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    // Auto-locate the moment Map mode is entered -- "the page will populate
+    // a map and will be set close to my location" -- rather than waiting on
+    // an extra tap. switchMode() only fires this once per entry (it early-
+    // returns if the mode doesn't actually change), so re-tapping Map after
+    // it's already active won't spam relocate; leaving and coming back will.
+    LaunchedEffect(searchMode) {
+        if (searchMode == MerchantSearchMode.MAP && lastSearchedCenter == null) {
+            useMyLocation()
+        }
+    }
+
+    // Offers "Search this area" once the user pans away from wherever was
+    // last searched and lets go -- not while the map is still moving under
+    // their finger, and not for a jitter-sized nudge.
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (!cameraPositionState.isMoving) {
+            val center = cameraPositionState.position.target
+            val last = lastSearchedCenter
+            if (last != null) {
+                val distanceMeters = FloatArray(1)
+                Location.distanceBetween(last.latitude, last.longitude, center.latitude, center.longitude, distanceMeters)
+                if (distanceMeters[0] > 400) {
+                    showSearchThisArea = true
+                }
+            }
+        }
+    }
+
+    fun save() {
+        val merchant = selected ?: return
+        coroutineScope.launch {
+            isSaving = true
+            errorMessage = null
+            try {
+                RetrofitClient.userApi.addMerchantToList(
+                    userId = currentUser.id,
+                    merchantId = merchant.id,
+                    request = MerchantTargetRequest(targetAmount = targetText.toDoubleOrNull())
+                )
+                onAdded()
+            } catch (e: Exception) {
+                errorMessage = "Couldn't add that merchant right now."
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.85f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White)
+                .padding(20.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = "Back",
+                            tint = TieyohNavy
+                        )
+                    }
+                    Text(
+                        text = "My Picks",
+                        color = TieyohNavy,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "Add a merchant",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TieyohNavy
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Search the Tieyoh merchant registry to add a pick to your list.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TieyohMuted
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(TieyohMuted.copy(alpha = 0.10f))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    MerchantSearchMode.values().forEach { mode ->
+                        val isActive = searchMode == mode
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isActive) Color.White else Color.Transparent)
+                                .clickable { switchMode(mode) }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                mode.label,
+                                fontSize = 13.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isActive) TieyohNavy else TieyohMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                if (searchMode == MerchantSearchMode.MAP) {
+                    if (locationServicesDisabled) {
+                        TieyohSecondaryButton(
+                            text = "Turn on Location",
+                            onClick = {
+                                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                            }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(TieyohMuted.copy(alpha = 0.10f))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        listOf("Map" to true, "List" to false).forEach { (label, isMap) ->
+                            val isActive = showMapView == isMap
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isActive) Color.White else Color.Transparent)
+                                    .clickable { showMapView = isMap }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isActive) TieyohNavy else TieyohMuted
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        placeholder = { Text("Search by name, address, city, or zip") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { search() }),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // Spelled out explicitly -- not obvious from the
+                    // placeholder alone once it's scrolled out of view
+                    // while typing that this one box covers all four.
+                    Text(
+                        text = "Try a business name like \"Starbucks,\" a full or partial street address, a city, or a ZIP code.",
+                        fontSize = 11.5.sp,
+                        color = TieyohMuted
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    TieyohPrimaryButton(
+                        text = "Search",
+                        onClick = { search() }
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                if (searchMode == MerchantSearchMode.MAP && showMapView) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(
-                                if (target.goal > 0) (target.current.toFloat() / target.goal).coerceIn(0f, 1f) else 0f
-                            )
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Brush.horizontalGradient(listOf(TieyohBlue, TieyohTealGradient)))
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                    ) {
+                        GoogleMap(
+                            modifier = Modifier.fillMaxSize(),
+                            cameraPositionState = cameraPositionState,
+                            properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
+                            uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false)
+                        ) {
+                            results.forEach { merchant ->
+                                val lat = merchant.latitude
+                                val lng = merchant.longitude
+                                if (lat != null && lng != null) {
+                                    val alreadyAdded = merchant.id in existingIds
+                                    Marker(
+                                        state = MarkerState(position = LatLng(lat, lng)),
+                                        title = merchant.brandName,
+                                        snippet = if (alreadyAdded) "Already on your list" else merchant.category,
+                                        onClick = {
+                                            if (!alreadyAdded) selected = merchant
+                                            true
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isSearching) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = TieyohAccent)
+                            }
+                        }
+
+                        if (hasSearched && results.isEmpty() && !isSearching) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 12.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text("No merchants found in this area.", fontSize = 12.sp, color = TieyohMuted)
+                            }
+                        }
+
+                        if (showSearchThisArea) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 40.dp, vertical = 12.dp)
+                            ) {
+                                TieyohSecondaryButton(
+                                    text = "Search this area",
+                                    onClick = {
+                                        val target = cameraPositionState.position.target
+                                        coroutineScope.launch {
+                                            fetchNearbyAt(target.latitude, target.longitude, moveCamera = false)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    when {
+                        isSearching -> Box(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = TieyohAccent)
+                        }
+
+                        hasSearched && results.isEmpty() -> Text(
+                            if (searchMode == MerchantSearchMode.MAP)
+                                "No merchants found near you."
+                            else
+                                "No places found -- try a different search.",
+                            color = TieyohMuted,
+                            fontSize = 13.sp
+                        )
+
+                        else -> LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(results, key = { it.id }) { merchant ->
+                                val alreadyAdded = merchant.id in existingIds
+                                val isSelected = selected?.id == merchant.id
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isSelected) TieyohAccent.copy(alpha = 0.10f) else Color.White)
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isSelected) TieyohAccent else TieyohMuted.copy(alpha = 0.25f),
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable(enabled = !alreadyAdded) { selected = merchant }
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    MerchantLogoThumb(merchant)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(merchant.brandName, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                                        val subtitle = listOfNotNull(
+                                            merchant.category,
+                                            merchant.distanceMiles?.let { formatDistance(it) }
+                                        ).joinToString("  ·  ")
+                                        if (subtitle.isNotEmpty()) {
+                                            Text(subtitle, fontSize = 12.sp, color = TieyohMuted)
+                                        }
+                                    }
+                                    when {
+                                        alreadyAdded -> Text("Already on your list", fontSize = 11.sp, color = TieyohMuted)
+                                        isSelected -> Text("Selected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TieyohAccent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                selected?.let { merchant ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Set a wish target for ${merchant.brandName}? (optional)",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TieyohNavy
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = targetText,
+                        onValueChange = { input -> targetText = input.filter { it.isDigit() || it == '.' } },
+                        placeholder = { Text("Add now, or skip and set it later") },
+                        prefix = { Text("$") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                errorMessage?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = TieyohGiftRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                TieyohPrimaryButton(
+                    text = "Add to My Picks",
+                    onClick = { save() },
+                    enabled = selected != null && !isSaving,
+                    isLoading = isSaving
+                )
+            }
+        }
+    }
+}
+@Composable
+private fun MyCardScreen(
+    currentUser: AuthResponse,
+    onNavigateToPayWithQr: () -> Unit,
+    onNavigateToPayWithCard: () -> Unit,
+    onNavigateToWalletOverview: () -> Unit
+) {
+    // Tapping the small avatar next to the name blows it up full-size in
+    // a dismissible overlay -- stays a small 44dp circle inline otherwise.
+    var showFullPicture by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Left-justified name + @handle in place of the old "My Card" title --
+        // same fonts/sizes as the name + handle on MyQrCodeScreen (17sp bold /
+        // 14sp), start-aligned here instead of centered, full name
+        // (currentUser.displayName is first + last). Per the screen's color
+        // pass: this name and "Choose how to pay" are the two labels that
+        // stay black; every other word on the screen is navy blue.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Same NetworkAvatar used for every other person's picture in
+            // the app (friends list, invites, etc.) -- circular photo with
+            // an initial-letter fallback, just sized down a touch (44dp)
+            // to sit comfortably next to the name instead of the 56dp used
+            // in a list row. Clickable here (and only here) to open the
+            // full-size view below.
+            NetworkAvatar(
+                profilePictureBase64 = currentUser.profilePictureBase64,
+                displayName = currentUser.displayName,
+                size = 44.dp,
+                modifier = Modifier.clickable { showFullPicture = true }
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column {
+                Text(
+                    text = currentUser.displayName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = Color.Black
+                )
+                currentUser.tieyohId?.takeIf { it.isNotBlank() }?.let { tieyohId ->
+                    // tieyohId is already stored with its official "@t-" prefix
+                    // (see ChooseIdScreen's TIEYOH_ID_PREFIX) -- show it as-is
+                    // rather than stripping down to a bare "@handle".
+                    Text(
+                        text = tieyohId,
+                        color = TieyohBrandDarkBlue,
+                        fontSize = 14.sp
                     )
                 }
             }
         }
 
-        item {
+        Spacer(Modifier.height(20.dp))
+
+        // New: opens a page listing every balance and gift card received
+        // from the user's circle -- sits above "Choose how to pay" per the
+        // approved mockup (white top strip with the Tieyoh logo + "My
+        // Cards" label, brand-gradient lower half with a wave overlay).
+        WalletOverviewCard(onClick = onNavigateToWalletOverview)
+
+        Spacer(Modifier.height(20.dp))
+
+        ChooseHowToPaySection(
+            onPayWithQr = { onNavigateToPayWithQr() },
+            onUsePrepaidCard = { onNavigateToPayWithCard() }
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        MyCardActionsSection()
+    }
+
+    if (showFullPicture) {
+        Dialog(
+            onDismissRequest = { showFullPicture = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            // Full-bleed dark scrim, tap anywhere to dismiss -- same idea
+            // as a standard photo-viewer overlay. The picture itself sits
+            // centered at a much larger size (260dp) than the 44dp inline
+            // version, same NetworkAvatar component so a missing photo
+            // still falls back to the same big initial letter instead of
+            // a broken image.
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.5.dp, TieyohAccent, RoundedCornerShape(14.dp))
-                    .padding(16.dp),
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f))
+                    .clickable { showFullPicture = false },
                 contentAlignment = Alignment.Center
             ) {
-                Text("+ Add a merchant to your list", color = TieyohAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                NetworkAvatar(
+                    profilePictureBase64 = currentUser.profilePictureBase64,
+                    displayName = currentUser.displayName,
+                    size = 260.dp
+                )
             }
         }
     }
 }
 
+// New entry point on the My Card screen: opens a page listing every
+// balance and gift card the user has received from their circle. Matches
+// the approved mockup -- white top strip (official Tieyoh logo + "My
+// Cards" label) over a brand-gradient lower half (headline, subtitle and
+// a chevron), with a visible border around the whole card and a wave
+// overlay on the gradient half echoing the wave already used on the
+// prepaid card face (PayWithCardScreen's CardWaveOverlay).
 @Composable
-private fun MyCardScreen() {
-
-    val allocations = listOf(
-        MerchantAllocation("Blue Bottle Coffee", 40.0, isTieyohMerchant = true),
-        MerchantAllocation("Whole Foods", 15.0, isTieyohMerchant = true)
-    )
-
-    var selectedMerchant by remember { mutableStateOf<MerchantAllocation?>(null) }
-
-    val activeSelection = selectedMerchant
-    if (activeSelection != null) {
-        MerchantPaymentScreen(
-            allocation = activeSelection,
-            onBack = { selectedMerchant = null }
-        )
-        return
-    }
-
+private fun WalletOverviewCard(onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .border(width = 1.dp, color = TieyohNavy.copy(alpha = 0.14f), shape = RoundedCornerShape(20.dp))
+            .background(Color.White)
+            .clickable { onClick() }
     ) {
-        Text("My card", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Funds stay grouped by merchant below until you spend them there — tap a merchant to pay.",
-            color = TieyohMuted
-        )
-        Spacer(Modifier.height(20.dp))
-        Text("Held by merchant", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 15.sp)
-        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.tieyoh_logo_transparent),
+                contentDescription = "Tieyoh",
+                modifier = Modifier.height(34.dp)
+            )
+            Text(
+                text = "MY CARDS",
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                letterSpacing = 1.sp,
+                color = TieyohMuted
+            )
+        }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(allocations) { allocation ->
-                Row(
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Brush.linearGradient(listOf(TieyohBrandBlue, TieyohBrandTeal)))
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            WalletOverviewCardWave(modifier = Modifier.matchParentSize())
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "See all your balances & gift cards",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        lineHeight = 21.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "View money and gift cards you've received from your circle \u2014 all in one place.",
+                        color = Color.White.copy(alpha = 0.88f),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(TieyohCardBg)
-                        .clickable { selectedMerchant = allocation }
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.20f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(allocation.merchant, color = TieyohNavy, fontWeight = FontWeight.Bold)
-                    Text("\$${"%.2f".format(allocation.amount)}", color = TieyohNavy, fontWeight = FontWeight.Bold)
+                    WalletOverviewChevronGlyph(color = Color.White, size = 16.dp)
                 }
             }
         }
     }
 }
 
-// Shown when the user taps a merchant on "My card". Payment isn't wired up
-// yet — this is the entry point for the next round of changes (real card
-// charge vs. QR handoff to the merchant's own Tieyoh-registered terminal).
+// Two soft translucent waves on the gradient half -- same cubic-Bezier
+// approach as PayWithCardScreen's CardWaveOverlay, redrawn here since that
+// one is private to its own file.
 @Composable
-private fun MerchantPaymentScreen(
-    allocation: MerchantAllocation,
-    onBack: () -> Unit
+private fun WalletOverviewCardWave(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        val backWave = Path().apply {
+            moveTo(0f, h * 0.55f)
+            cubicTo(w * 0.25f, h * 0.85f, w * 0.55f, h * 0.35f, w, h * 0.65f)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(path = backWave, color = Color.White.copy(alpha = 0.10f))
+
+        val frontWave = Path().apply {
+            moveTo(0f, h * 0.75f)
+            cubicTo(w * 0.35f, h * 0.45f, w * 0.65f, h * 0.95f, w, h * 0.60f)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(path = frontWave, color = Color.White.copy(alpha = 0.16f))
+    }
+}
+
+// Simple chevron (">") stroke glyph -- consistent with this file's own
+// convention of hand-drawn Canvas glyphs rather than Material icons.
+@Composable
+internal fun WalletOverviewChevronGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 16f
+        val path = Path().apply {
+            moveTo(6f * s, 3f * s)
+            lineTo(11f * s, 8f * s)
+            lineTo(6f * s, 13f * s)
+        }
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(width = 2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+// "Registered/partnered merchant" QR pay vs. "everywhere else" prepaid
+// card -- the two ways to pay with Tieyoh, side by side. Both are
+// placeholders (coming-soon) until the actual payment flows are built.
+@Composable
+private fun ChooseHowToPaySection(
+    onPayWithQr: () -> Unit,
+    onUsePrepaidCard: () -> Unit
 ) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp)
+            .fillMaxWidth()
+            .shadow(elevation = 3.dp, shape = RoundedCornerShape(20.dp), clip = false)
+            .clip(RoundedCornerShape(20.dp))
+            .background(TieyohChooseHowBg)
+            .padding(vertical = 18.dp, horizontal = 14.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable { onBack() }
-        ) {
-            Text("←", fontSize = 20.sp, color = TieyohNavy, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(10.dp))
-            Text("Back", color = TieyohNavy, fontSize = 15.sp)
-        }
-
-        Spacer(Modifier.height(24.dp))
-
         Text(
-            allocation.merchant,
-            style = MaterialTheme.typography.headlineMedium,
+            "Choose how to pay",
             fontWeight = FontWeight.Bold,
-            color = TieyohNavy
+            fontSize = 22.sp,
+            color = Color.Black,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "\$${"%.2f".format(allocation.amount)} available",
-            color = TieyohMuted,
-            fontSize = 15.sp
-        )
-
-        Spacer(Modifier.height(28.dp))
-        Text("How would you like to pay?", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 15.sp)
         Spacer(Modifier.height(14.dp))
-
-        TieyohPrimaryButton(
-            text = "Pay with my Tieyoh card",
-            onClick = { /* card payment flow — coming soon */ }
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        if (allocation.isTieyohMerchant) {
-            TieyohSecondaryButton(
-                text = "Scan merchant QR code",
-                onClick = { /* QR scan flow — coming soon */ }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.Top
+        ) {
+            PayOptionTile(
+                modifier = Modifier.weight(1f),
+                tileBg = TieyohMintTileBg,
+                iconBg = TieyohMintIconBg,
+                iconInk = TieyohNavy,
+                title = "Partnered\nMerchants",
+                subtitle = "Use your Tieyoh\nQR code",
+                buttonLabel = "Pay with QR",
+                icon = { color -> QrCodeGlyph(ink = color, bg = TieyohMintIconBg, size = 40.dp) },
+                onClick = onPayWithQr
             )
-        } else {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "QR payment isn't available — this merchant isn't registered with Tieyoh yet.",
-                color = TieyohMuted,
-                fontSize = 13.sp
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = 6.dp)
+                    .width(1.dp)
+                    .background(TieyohNavy.copy(alpha = 0.10f))
+            )
+            PayOptionTile(
+                modifier = Modifier.weight(1f),
+                tileBg = TieyohBlueTileBg,
+                iconBg = TieyohBlueIconBg,
+                iconInk = TieyohBlue,
+                title = "All Other\nMerchants",
+                subtitle = "Use your Tieyoh\nprepaid card",
+                buttonLabel = "Pay with Card",
+                buttonGradient = listOf(TieyohAccent, TieyohBlue),
+                icon = { color -> BroadcastGlyph(color = color, size = 40.dp) },
+                onClick = onUsePrepaidCard
             )
         }
+    }
+}
+
+// The buttons here match the app's one shared button standard
+// (TieyohPrimaryButton from TieyohButtons.kt -- same pill shape, height,
+// and white/bold text as every other screen's buttons), not a bespoke
+// pill. "Pay with QR" uses that standard component as-is. "Pay with Card"
+// needs a different gradient (green -> blue instead of the app-wide
+// blue -> teal) for this button only, so it draws the identical pill
+// shape/size by hand with a custom Brush -- buttonGradient stays null
+// everywhere else, which keeps every other button on the real
+// TieyohPrimaryButton component.
+@Composable
+private fun PayOptionTile(
+    modifier: Modifier = Modifier,
+    tileBg: Color,
+    iconBg: Color,
+    iconInk: Color,
+    title: String,
+    subtitle: String,
+    buttonLabel: String,
+    buttonGradient: List<Color>? = null,
+    icon: @Composable (Color) -> Unit,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(16.dp))
+            .background(tileBg)
+            .clickable { onClick() }
+            .padding(vertical = 16.dp, horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(iconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            icon(iconInk)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            title,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = TieyohBrandDarkBlue,
+            textAlign = TextAlign.Center,
+            lineHeight = 19.sp
+        )
+        Text(
+            subtitle,
+            fontSize = 13.sp,
+            color = TieyohBrandDarkBlue,
+            textAlign = TextAlign.Center,
+            lineHeight = 17.sp
+        )
+        Spacer(Modifier.height(10.dp))
+        if (buttonGradient != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(TieyohButtonHeight)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Brush.horizontalGradient(buttonGradient))
+                    .clickable { onClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(buttonLabel, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            }
+        } else {
+            TieyohPrimaryButton(text = buttonLabel, onClick = onClick, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+// Everything else you can do with the card -- transaction history and
+// spending insights, both full width. "Add to Wallet" was dropped
+// entirely (PayWithCardScreen already has its own "Add to Wallet"
+// button, so this was a duplicate) and "One-Time Virtual Card" moved
+// into PayWithCardScreen's own action list, since generating a virtual
+// card number is something you do with the prepaid card specifically,
+// not a generic My Card action. Both remaining rows are coming-soon
+// placeholders until their own screens are built. ("View My QR Code" was
+// dropped from here too -- it duplicated the "Pay with QR" option
+// above.)
+@Composable
+private fun MyCardActionsSection() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Full width rather than squeezed into a half-width column -- root
+        // cause of the earlier "Transactio / n" wrap: at this font size
+        // "Transaction" (11 letters, no natural break point) is simply
+        // wider than a half-width tile can ever offer once you subtract
+        // the icon circle, its spacing, and the arrow -- so no choice of
+        // manual line break or font tweak inside that width fixes it
+        // reliably across devices/font scales, only more width does. Full
+        // width gives every device comfortable room for the whole word, so
+        // this doesn't depend on screen size or system font scale to look
+        // right.
+        MyCardActionRow(
+            modifier = Modifier.fillMaxWidth(),
+            title = "Transaction History",
+            subtitle = "View and search",
+            icon = { color -> HistoryGlyph(color = color, size = 26.dp) },
+            onClick = { /* transaction history -- coming soon */ }
+        )
+        MyCardActionRow(
+            modifier = Modifier.fillMaxWidth(),
+            title = "Activity & Insights",
+            subtitle = "See your spending and impact",
+            icon = { color -> InsightsGlyph(color = color, size = 26.dp) },
+            onClick = { /* spending insights -- coming soon */ }
+        )
+    }
+}
+
+@Composable
+internal fun MyCardActionRow(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    icon: @Composable (Color) -> Unit,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .shadow(elevation = 2.dp, shape = RoundedCornerShape(16.dp), clip = false)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White)
+            .clickable { onClick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(TieyohBlueTileBg),
+            contentAlignment = Alignment.Center
+        ) {
+            icon(TieyohBlue)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, color = TieyohBrandDarkBlue, lineHeight = 19.sp)
+            Text(subtitle, fontSize = 13.sp, color = TieyohBrandDarkBlue)
+        }
+        Spacer(Modifier.width(4.dp))
+        Text("›", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TieyohBrandDarkBlue)
+    }
+}
+
+// -- "My Card" glyphs -------------------------------------------------
+// Hand-drawn with Canvas rather than a drawable/vector asset, matching how
+// the rest of the app draws its custom icons (see the send-FAB seam
+// above). `bg` on QrCodeGlyph is the color behind the icon circle it's
+// drawn on -- used to punch the finder-pattern "holes" so they read as
+// hollow squares rather than solid ones.
+
+@Composable
+private fun QrCodeGlyph(ink: Color, bg: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        fun sq(x: Float, y: Float, w: Float, color: Color) {
+            drawRect(color = color, topLeft = Offset(x * s, y * s), size = Size(w * s, w * s))
+        }
+        fun finder(x: Float, y: Float) {
+            sq(x, y, 7f, ink)
+            sq(x + 1.4f, y + 1.4f, 4.2f, bg)
+            sq(x + 2.6f, y + 2.6f, 1.8f, ink)
+        }
+        finder(1f, 1f)
+        finder(16f, 1f)
+        finder(1f, 16f)
+        sq(16f, 16f, 2.6f, ink)
+        sq(19.4f, 16f, 2.6f, ink)
+        sq(16f, 19.4f, 2.6f, ink)
+        sq(19.4f, 19.4f, 2.6f, bg)
+        sq(11.5f, 1f, 2.4f, ink)
+        sq(1f, 11.5f, 2.4f, ink)
+        sq(11f, 11f, 2.2f, ink)
+        sq(16f, 11f, 2.2f, ink)
+        sq(11f, 16f, 2.2f, ink)
+    }
+}
+
+@Composable
+private fun BroadcastGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val stroke = Stroke(width = 2.2f * s, cap = StrokeCap.Round)
+        fun arc(r: Float) {
+            drawArc(
+                color = color,
+                startAngle = -90f,
+                sweepAngle = 90f,
+                useCenter = false,
+                topLeft = Offset((6f - r) * s, (18f - r) * s),
+                size = Size(2 * r * s, 2 * r * s),
+                style = stroke
+            )
+        }
+        arc(4f)
+        arc(7.5f)
+        arc(11f)
+        drawCircle(color = color, radius = 1.5f * s, center = Offset(6f * s, 18f * s))
+    }
+}
+
+@Composable
+internal fun VirtualCardGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val strokeW = 1.8f * s
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(2f * s, 5f * s),
+            size = Size(20f * s, 14f * s),
+            cornerRadius = CornerRadius(2.5f * s, 2.5f * s),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(
+            color = color,
+            start = Offset(2f * s, 9.5f * s),
+            end = Offset(22f * s, 9.5f * s),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(6f * s, 14.5f * s),
+            end = Offset(10f * s, 14.5f * s),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+private fun HistoryGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val strokeW = 1.8f * s
+        drawCircle(
+            color = color,
+            radius = 9f * s,
+            center = Offset(12f * s, 12f * s),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+        )
+        val hands = Path().apply {
+            moveTo(12f * s, 7f * s)
+            lineTo(12f * s, 12f * s)
+            lineTo(15.5f * s, 14f * s)
+        }
+        drawPath(
+            path = hands,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+private fun InsightsGlyph(color: Color, size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val strokeW = 1.8f * s
+        drawLine(color = color, start = Offset(5f * s, 21f * s), end = Offset(5f * s, 13f * s), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(color = color, start = Offset(12f * s, 21f * s), end = Offset(12f * s, 9f * s), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(color = color, start = Offset(19f * s, 21f * s), end = Offset(19f * s, 5f * s), strokeWidth = strokeW, cap = StrokeCap.Round)
     }
 }
 
@@ -2812,12 +4290,20 @@ private fun MerchantSearchScreen(
     subtitle: String,
     actionLabel: String,
     onMerchantSelected: ((MerchantDto) -> Unit)? = null,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    // Static per-call-site label, same reasoning as PaymentMethodSetupScreen's
+    // backLabel above -- this composable is shared by two call sites
+    // (SEARCH_MERCHANT and SEND_GIFT_MERCHANT_SEARCH) that return to
+    // genuinely different screens.
+    backLabel: String = "Feed"
 ) {
 
-    var merchantName by remember { mutableStateOf("") }
-    var zipCode by remember { mutableStateOf("") }
-    var fullAddress by remember { mutableStateOf("") }
+    // One combined field for name/address/city/zip, same shape
+    // RetrofitClient.merchantApi.searchMerchants takes now -- matches the
+    // single-box search used by MerchantSelectionScreen and the "Add a
+    // merchant" sheet elsewhere in the app. Merchant type stays its own
+    // field since it's a separate, independently-ANDed category filter.
+    var searchText by remember { mutableStateOf("") }
     var merchantType by remember { mutableStateOf("") }
 
     var merchants by remember {
@@ -2844,14 +4330,18 @@ private fun MerchantSearchScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                    contentDescription = "Back",
+                    tint = TieyohNavy
+                )
+            }
             Text(
-                "←",
-                fontSize = 20.sp,
+                text = backLabel,
                 color = TieyohNavy,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .padding(vertical = 8.dp)
-                    .clickable { onBack() }
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
             )
         }
 
@@ -2875,29 +4365,10 @@ private fun MerchantSearchScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = merchantName,
-            onValueChange = { merchantName = it },
-            label = { Text("Merchant name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        OutlinedTextField(
-            value = zipCode,
-            onValueChange = { zipCode = it },
-            label = { Text("ZIP code") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        OutlinedTextField(
-            value = fullAddress,
-            onValueChange = { fullAddress = it },
-            label = { Text("Full address") },
+            value = searchText,
+            onValueChange = { searchText = it },
+            label = { Text("Name, address, city, or ZIP") },
+            placeholder = { Text("e.g. \"Starbucks\", a street address, a city, or a ZIP code") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -2907,7 +4378,7 @@ private fun MerchantSearchScreen(
         OutlinedTextField(
             value = merchantType,
             onValueChange = { merchantType = it },
-            label = { Text("Merchant type") },
+            label = { Text("Merchant type (optional)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -2925,9 +4396,7 @@ private fun MerchantSearchScreen(
 
                     try {
                         merchants = RetrofitClient.merchantApi.searchMerchants(
-                            name = merchantName.trim().ifBlank { null },
-                            zip = zipCode.trim().ifBlank { null },
-                            address = fullAddress.trim().ifBlank { null },
+                            q = searchText.trim().ifBlank { null },
                             merchantType = merchantType.trim().ifBlank { null }
                         )
                     } catch (e: Exception) {
@@ -3055,6 +4524,8 @@ private fun MerchantResultCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+
+            MerchantLogoThumb(merchant)
 
             Column(
                 modifier = Modifier.weight(1f)
