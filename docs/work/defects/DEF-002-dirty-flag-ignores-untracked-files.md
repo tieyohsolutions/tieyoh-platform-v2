@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Fixed — awaiting re-test |
+| Status | Closed — verified |
 | Jira type | Bug |
 | Severity | Low |
 | Linked requirement | REQ-001 (Decision 4: dirty flag; related to AC-5 intent) |
@@ -42,4 +42,19 @@ _Mississippi, 2026-10-14, commit 1aba418 on feature/REQ-001-backend-build-info_
 - **Verified manually** in a scratch worktree: clean gives false, untracked file gives true, ignored file only gives false, staged change gives true.
 
 ## Verification
-_(Missouri appends)_
+_Missouri, 2026-10-14, re-test of 1aba418/8e39bf5 (scratch clone and a linked worktree)._
+
+Result: **PASS - Closed.**
+
+| Scenario | git.dirty |
+|---|---|
+| clean tree | false |
+| untracked, non-ignored file in module | true |
+| only an ignored file (via .git/info/exclude) | false |
+| tracked file modified (unstaged) | true |
+| tracked file modified and staged | true |
+| untracked file at repo root, outside the module | true |
+| clean again after cleanup | false |
+| same untracked / tracked / clean checks in a linked worktree | true / true / false |
+
+Observation (not a defect): any untracked non-ignored file anywhere in the repository (e.g. `.DS_Store`, `tieyoh-test/`) makes dirty true, as the developer documented.
