@@ -25,9 +25,9 @@ import org.springframework.context.annotation.Configuration;
  * and {@code git.dirty} into git.properties (see pom.xml), so no branch, author,
  * remote or message data is available here in the first place.
  *
- * <p>When the artifact was built without a .git directory, git.properties is
- * either missing (bean not created) or empty (contributor adds nothing), so
- * the git section is omitted.
+ * <p>When the artifact was built without git metadata, git.properties is
+ * missing (bean not created) or, defensively, empty (contributor adds
+ * nothing), so the git section is omitted.
  */
 @Configuration(proxyBeanMethods = false)
 public class BuildInfoConfiguration {
@@ -46,9 +46,10 @@ public class BuildInfoConfiguration {
 
 		@Override
 		public void contribute(Info.Builder builder) {
-			// Without a .git directory the git plugin still writes a
-			// git.properties, just with no entries. Omit the git section
-			// entirely in that case rather than reporting empty/null values.
+			// Without git metadata the build writes no git.properties at all
+			// (see pom.xml). Defensively, an empty or partial git.properties
+			// also omits the git section rather than reporting empty/null
+			// values.
 			if (getProperties().getShortCommitId() == null) {
 				return;
 			}
