@@ -138,6 +138,51 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<!-- REQ-001: writes META-INF/build-info.properties (name,
+					     version, build time) for /actuator/info. The time is
+					     fixed when the artifact is built, not at startup.
+					     group and artifact are excluded: only the approved
+					     fields are generated. -->
+					<execution>
+						<id>build-info</id>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+						<configuration>
+							<excludeInfoProperties>
+								<excludeInfoProperty>group</excludeInfoProperty>
+								<excludeInfoProperty>artifact</excludeInfoProperty>
+							</excludeInfoProperties>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- REQ-001: writes git.properties for /actuator/info. Only the
+			     approved git fields are generated (short commit id, commit
+			     time, dirty flag) so author/committer names and emails,
+			     remote URL, commit message, branch, build host/user and
+			     tags never reach the artifact. Building without a .git
+			     directory (source archive, container context) must not fail:
+			     the file is simply not generated and the git section is
+			     omitted from /actuator/info. verbose=false keeps git metadata
+			     (incl. author emails) out of build logs. -->
+			<plugin>
+				<groupId>io.github.git-commit-id</groupId>
+				<artifactId>git-commit-id-maven-plugin</artifactId>
+				<configuration>
+					<verbose>false</verbose>
+					<failOnNoGitDirectory>false</failOnNoGitDirectory>
+					<failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+					<abbrevLength>7</abbrevLength>
+					<dateFormat>yyyy-MM-dd'T'HH:mm:ssXXX</dateFormat>
+					<dateFormatTimeZone>UTC</dateFormatTimeZone>
+					<includeOnlyProperties>
+						<includeOnlyProperty>^git\.commit\.id\.abbrev$</includeOnlyProperty>
+						<includeOnlyProperty>^git\.commit\.time$</includeOnlyProperty>
+						<includeOnlyProperty>^git\.dirty$</includeOnlyProperty>
+					</includeOnlyProperties>
+				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
