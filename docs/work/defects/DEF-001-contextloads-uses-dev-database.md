@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Fixed — awaiting re-test |
+| Status | Closed — verified |
 | Jira type | Bug |
 | Severity | Medium |
 | Linked requirement | REQ-001 (AC-18 context; pre-existing, not caused by REQ-001) |
@@ -44,4 +44,13 @@ _Mississippi, 2026-10-14, commit 1aba418 on feature/REQ-001-backend-build-info_
 - **Verified:** full `./mvnw clean package` passes (45 tests, 0 failures) in a fresh clone. A read-only query of the dev DB `flyway_schema_history` afterwards still shows 30 rows, last installed 2026-09-25.
 
 ## Verification
-_(Missouri appends: re-test date, result)_
+_Missouri, 2026-10-14, re-test of 1aba418/8e39bf5 in a separate scratch clone (not the dev target dir)._
+
+Result: **PASS - Closed.**
+
+- Full `./mvnw -B clean package` with Docker: BUILD SUCCESS, 45 tests, 0 failures (TieyohApiApplicationTests 3, TestDatabaseGuardTests 1, actuator tests 41).
+- Dev DB read-only snapshot (`docker exec tieyoh-postgres psql ... select`) before and after the full run (and after the no-Docker runs): `flyway_schema_history` 30 rows, max installed_on `2026-09-25 10:15:00.558144`, max rank 30; `pg_stat_database.tup_inserted` 106 and `tup_updated` 15 unchanged; active sessions 11 unchanged. No Flyway activity on the dev DB.
+- Test log shows Testcontainers starting `postgres:16` (JDBC URL `localhost:64865/test`) and Flyway applying 31 migrations (30 + test seed) to that container, never localhost:5432.
+- Seed migration `db/testdata/V27_1__...sql` is under `src/test/resources`; `unzip -l` on the packaged jar shows no `testdata`/`V27_1` entries (only the 30 real `db/migration` files). `application.properties` sets no `spring.flyway.locations`, so the main app uses only `classpath:db/migration`.
+- Without Docker: ran the test with the Docker socket blocked (macOS sandbox-exec deny on the docker unix sockets). Result: `Could not find a valid Docker environment`, 3 errors, build FAILED (rc=1). No fallback to localhost:5432; dev DB counters unchanged.
+- Note: `DOCKER_HOST=bad` alone does not simulate this, because Testcontainers falls back to /var/run/docker.sock; that is Testcontainers behaviour, not a fallback to the dev DB.

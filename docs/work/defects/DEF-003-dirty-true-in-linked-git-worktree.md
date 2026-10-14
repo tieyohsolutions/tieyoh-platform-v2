@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Fixed — awaiting re-test |
+| Status | Closed — verified |
 | Jira type | Bug |
 | Severity | Medium |
 | Linked requirement | REQ-001 (AC-5 commit matches checked-out source; Decision 4 dirty flag) |
@@ -43,4 +43,11 @@ _Mississippi, 2026-10-14, commit 1aba418 on feature/REQ-001-backend-build-info_
 - **Verified:** in a scratch linked worktree on a different commit than its main checkout (which had uncommitted changes), the full `./mvnw clean test` passed 45/45, with `git.commit.id.abbrev` equal to the worktree HEAD and `git.dirty=false`. In a fresh clone the packaged jar's `BOOT-INF/classes/git.properties` holds only the three keys, and the build log has no author, email, remote, branch or message.
 
 ## Verification
-_(Missouri appends)_
+_Missouri, 2026-10-14, re-test of 1aba418/8e39bf5._
+
+Result: **PASS - Closed.**
+
+- Scratch clone HEAD = 8e39bf5. Linked worktree created from it on a different commit (1aba418, detached). `./mvnw clean package -DskipTests` in the worktree: jar `BOOT-INF/classes/git.properties` = `git.commit.id.abbrev=1aba418`, `git.commit.time=2026-10-14T21:31:38Z` (equals the commit's committer time in UTC), `git.dirty=false`. Previously this reported the main checkout's commit and dirty=true.
+- With the main clone dirtied (tracked change in its pom.xml) while the worktree stayed clean: worktree still reports 1aba418 and dirty=false (no cross-contamination).
+- Normal clone at 8e39bf5: `git.commit.id.abbrev=8e39bf5`, dirty=false (matches `git rev-parse --short HEAD`).
+- Automated tests `GitPropertiesMatchCheckoutTests` (3) pass in the full build.
