@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(./mvnw *)",
+      "Bash(./gradlew *)",
+      "Bash(xcodebuild *)",
+      "Bash(xcrun simctl *)",
+      "Bash(docker compose *)",
+      "Bash(docker ps *)",
+      "Bash(docker logs *)",
+      "Bash(curl http://localhost*)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gitleaks *)",
+      "Bash(semgrep *)"
+    ],
+    "ask": [
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git reset *)",
+      "Bash(brew install *)",
+      "Bash(docker volume rm *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git push)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.azure/**)"
+    ]
+  }
+}
