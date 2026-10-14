@@ -94,4 +94,8 @@ object RetrofitClient {
     val giftApi: GiftApi by lazy {
         retrofit.create(GiftApi::class.java)
     }
+
+    val googleWalletApi: GoogleWalletApi by lazy {
+        retrofit.create(GoogleWalletApi::class.java)
+    }
 }

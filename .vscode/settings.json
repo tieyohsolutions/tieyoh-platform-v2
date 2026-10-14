@@ -9,7 +9,24 @@
             "name": "Tieyoh Local PostgresSQL",
             "database": "tieyoh",
             "username": "tieyoh"
+        },
+        {
+            "pgOptions": {
+                "ssl": {
+                    "rejectUnauthorized": true
+                }
+            },
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "tieyoh-solutions-pg.postgres.database.azure.com",
+            "port": 5432,
+            "askForPassword": true,
+            "driver": "PostgreSQL",
+            "name": "Tieyoh Solutions (Azure)",
+            "database": "tieyoh_solutions",
+            "username": "tieyohadmin"
         }
     ],
-    "java.compile.nullAnalysis.mode": "automatic"
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.configuration.updateBuildConfiguration": "interactive"
 }

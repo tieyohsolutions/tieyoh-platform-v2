@@ -18,10 +18,14 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import android.widget.Toast
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -43,6 +47,7 @@ import com.tieyoh.mobile.ui.theme.TieyohGiftRed
 import com.tieyoh.mobile.ui.theme.TieyohMuted
 import com.tieyoh.mobile.ui.theme.TieyohNavy
 import com.tieyoh.mobile.ui.theme.TieyohSponsoredLogoBg
+import kotlinx.coroutines.launch
 
 // Reached by tapping "Pay with Card" on the My Card screen
 // (ChooseHowToPaySection -> "All Other Merchants" tile). Same page shape
@@ -55,17 +60,26 @@ import com.tieyoh.mobile.ui.theme.TieyohSponsoredLogoBg
 // Card landing page... soft tints for the card face's background
 // gradient") but never actually used anywhere until now.
 //
-// Card Details / Manage Card / Set as Default Payment Method and "Add to
-// Wallet" are all placeholders for now, same as every other coming-soon
-// action already on MyCardActionsSection (wallet provisioning, virtual
-// card, transaction history, etc.) -- there's no prepaid-card backend yet
-// (balance, card issuance/tokenization, wallet provisioning APIs), so
-// nothing here is wired to a real card or a real wallet push.
+// Card Details / Manage Card / Set as Default Payment Method are still
+// placeholders -- there's no prepaid-card backend yet (balance, card
+// issuance/tokenization), so nothing there is wired to a real card.
+//
+// "Add to Wallet" is real: it calls GoogleWalletApi for a signed
+// save-to-Google-Wallet JWT (GoogleWalletService on the backend) and
+// launches Google Wallet's own on-device save flow via
+// GoogleWalletHelper.kt. For now the pass it creates is dummy/visual
+// only -- the same Tieyoh branding + cardholder name shown in
+// PrepaidCardFace below, no real payment capability -- until Highnote
+// provisioning replaces this endpoint's data with a real issued card.
 @Composable
 fun PayWithCardScreen(
     currentUser: AuthResponse,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val walletAvailable by rememberGoogleWalletAvailable()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -131,7 +145,24 @@ fun PayWithCardScreen(
             // the earlier enlarged hero-CTA treatment.
             TieyohPrimaryButton(
                 text = "Add to Wallet",
-                onClick = { /* Apple/Google/Samsung Wallet provisioning -- coming soon, see MyCardActionsSection's identical placeholder */ },
+                onClick = {
+                    if (!walletAvailable) {
+                        Toast.makeText(context, "Google Wallet isn't available on this device.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        scope.launch {
+                            try {
+                                val response = RetrofitClient.googleWalletApi.getPrepaidCardSaveJwt(currentUser.id)
+                                if (response.configured && response.saveJwt != null) {
+                                    launchAddToGoogleWallet(context, response.saveJwt, GOOGLE_WALLET_PREPAID_CARD_REQUEST_CODE)
+                                } else {
+                                    Toast.makeText(context, "Google Wallet isn't set up for Tieyoh yet.", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Couldn't add to Google Wallet. Try again.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
                 leadingContent = { WalletStackGlyph(size = 32.dp) },
                 backgroundColor = TieyohNavy
             )

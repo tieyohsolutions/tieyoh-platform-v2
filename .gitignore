@@ -1,1 +1,17 @@
 *.session.sql
+
+# Local / scratch
+Claude outputs/
+Mobile/.idea/deviceManager.xml
+
+# Secrets / service account keys
+*service-account*.json
+*-key.json
+*.p12
+*.pem
+.env
+.env.*
+
+# Merchant source data (local only)
+Backend/merchant-imports/*
+

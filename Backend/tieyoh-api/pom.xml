@@ -55,6 +55,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+		<!-- GoogleWalletService uses ObjectMapper/JsonNode directly to parse
+		     the service-account key file and build Wallet API request bodies.
+		     spring-boot-starter-webmvc does not appear to pull jackson-databind
+		     in at compile scope on this Spring Boot version (jjwt-jackson only
+		     brings it in at runtime scope, invisible to javac), so it's listed
+		     explicitly here. No version needed, since the parent BOM manages it. -->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
@@ -68,6 +78,28 @@
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-crypto</artifactId>
+		</dependency>
+		<!-- Signs the "Add to Google Wallet" save JWT (RS256, service
+		     account private key, loaded from GOOGLE_WALLET_SERVICE_ACCOUNT_KEY_PATH),
+		     see com.tieyoh.api.wallet.service.GoogleWalletService. Spring
+		     Boot's dependency management doesn't cover this artifact, hence
+		     the explicit version, same as poi-ooxml above. -->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>0.11.5</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>0.11.5</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>0.11.5</version>
+			<scope>runtime</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>
