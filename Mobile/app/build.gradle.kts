@@ -60,6 +60,11 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("com.google.android.gms:play-services-maps:19.0.0")
+    // Add to Google Wallet -- PayClient/Pay.getClient() below in
+    // GoogleWalletHelper.kt. Verify this is still the latest
+    // play-services-pay release in Android Studio; it can't be checked
+    // against Maven Central from this sandbox.
+    implementation("com.google.android.gms:play-services-pay:16.5.0")
     implementation("com.google.maps.android:maps-compose:6.4.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation(platform(libs.androidx.compose.bom))

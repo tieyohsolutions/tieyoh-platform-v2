@@ -16,19 +16,27 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tieyoh.mobile.ui.theme.TieyohBrandBlue
 import com.tieyoh.mobile.ui.theme.TieyohBrandTeal
 import com.tieyoh.mobile.ui.theme.TieyohMuted
+import com.tieyoh.mobile.ui.theme.TieyohNavy
 
 // The one button standard for the whole app: same pill shape, height, and
 // color scheme everywhere a button appears, matching what the redesigned
@@ -176,4 +184,69 @@ fun TieyohTextLink(
         fontSize = fontSize,
         modifier = modifier.clickable { onClick() }
     )
+}
+
+
+// The one segmented/toggle-pill standard for the whole app -- matches the
+// Tieyoh logo's own color scheme: the "tieyoh" wordmark's "yoh" is the same
+// blue->teal gradient as TieyohButtonGradient above (TieyohPrimaryButton's
+// fill), so a SELECTED pill in any segmented control, filter-chip row, or
+// sort toggle uses that identical gradient rather than a plain solid color.
+// An UNSELECTED pill stays a plain white pill with a faint navy border, so
+// only the active choice reads as "on brand." First used for the Week /
+// Month / Year range selector on Activity & Insights, and meant to be
+// reused any time a screen needs a row of mutually-exclusive pill choices
+// -- never invent a one-off selected-state color for this pattern.
+// Pills never wrap to a second line, even a long one like "Partnered (QR)"
+// squeezed into a third of a row by Modifier.weight(1f) -- the label
+// shrinks itself down (in 0.5sp steps, floor TieyohSegmentedPillMinFontSize)
+// until it fits on one line instead. drawWithContent holds the very first
+// frame back so the label doesn't visibly flash at full size before
+// settling on its final size.
+private val TieyohSegmentedPillMinFontSize = 9.sp
+
+@Composable
+fun TieyohSegmentedPill(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var fontSize by remember(label) { mutableStateOf(12.5.sp) }
+    var readyToDraw by remember(label) { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .let {
+                if (selected) {
+                    it.background(TieyohButtonGradient)
+                } else {
+                    it.background(Color.White)
+                        .border(width = 1.dp, color = TieyohNavy.copy(alpha = 0.14f), shape = RoundedCornerShape(20.dp))
+                }
+            }
+            .clickable { onClick() }
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = fontSize,
+            fontWeight = FontWeight.SemiBold,
+            color = if (selected) Color.White else TieyohNavy,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.drawWithContent { if (readyToDraw) drawContent() },
+            onTextLayout = { result ->
+                if (result.hasVisualOverflow && fontSize > TieyohSegmentedPillMinFontSize) {
+                    fontSize = (fontSize.value - 0.5f).sp
+                } else {
+                    readyToDraw = true
+                }
+            }
+        )
+    }
 }

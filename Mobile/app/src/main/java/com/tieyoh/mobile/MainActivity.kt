@@ -188,6 +188,35 @@ class MainActivity : FragmentActivity() {
                 var pendingHolidaysCelebrated by remember { mutableStateOf(setOf<String>()) }
                 var pendingAddress by remember { mutableStateOf("") }
 
+                // A fresh SessionState.NeedsProfile (a brand-new signup, or
+                // a returning login whose profile setup never finished)
+                // must always start this walkthrough from scratch. The
+                // fields above are hoisted here -- outside the NeedsProfile
+                // branch -- so Back arrows inside NeedsProfile/NeedsMerchants
+                // /etc. don't lose progress, but that same hoisting means
+                // they silently carry over from whichever account last went
+                // through this screen in the same app session. Without this
+                // reset, starting a second signup (or logging in as a
+                // different account that still needs profile setup) after
+                // an earlier one completed this flow would skip straight to
+                // whatever step -- and whichever user's data -- the
+                // previous account left behind: profileCompleteUser in
+                // particular would still hold the PREVIOUS user's
+                // AuthResponse, which is how a brand-new signup could end
+                // up finishing into someone else's account on the Feed.
+                fun resetProfileSetupState() {
+                    profileStep = ProfileStep.CHOOSE_ID
+                    pendingTieyohId = null
+                    profileCompleteUser = null
+                    pendingHandle = ""
+                    pendingHandleAvailable = false
+                    pendingPrivacyAgreed = false
+                    pendingBirthDate = null
+                    pendingGender = null
+                    pendingHolidaysCelebrated = setOf()
+                    pendingAddress = ""
+                }
+
                 // isNewSignup distinguishes "just finished creating an
                 // account" (NeedsSendGiftSetup's onDone, below) from a
                 // normal returning login (LoginScreen's onAuthenticated,
@@ -401,6 +430,7 @@ class MainActivity : FragmentActivity() {
                                                     )
                                                 )
                                                 rememberSession = true
+                                                resetProfileSetupState()
                                                 sessionState = SessionState.NeedsProfile(response)
                                             } catch (e: HttpException) {
                                                 val message = when (e.code()) {
@@ -445,6 +475,7 @@ class MainActivity : FragmentActivity() {
                                         // feed with no Tieyoh ID, ever, on every
                                         // later login.
                                         if (isSignup || response.tieyohId.isNullOrBlank()) {
+                                            resetProfileSetupState()
                                             sessionState = SessionState.NeedsProfile(response)
                                         } else {
                                             // A normal returning login --
@@ -840,7 +871,9 @@ private enum class TieyohScreen {
     PAY_WITH_QR,
     PAY_WITH_CARD,
     PARTNERED_MERCHANT_SEARCH,
-    WALLET_OVERVIEW
+    WALLET_OVERVIEW,
+    TRANSACTION_HISTORY,
+    ACTIVITY_INSIGHTS
 }
 
 private data class WishTarget(
@@ -1045,11 +1078,27 @@ fun TieyohApp(
                     currentUser = currentUser,
                     onNavigateToPayWithQr = { currentScreen = TieyohScreen.PAY_WITH_QR },
                     onNavigateToPayWithCard = { currentScreen = TieyohScreen.PAY_WITH_CARD },
-                    onNavigateToWalletOverview = { currentScreen = TieyohScreen.WALLET_OVERVIEW }
+                    onNavigateToWalletOverview = { currentScreen = TieyohScreen.WALLET_OVERVIEW },
+                    onNavigateToTransactionHistory = { currentScreen = TieyohScreen.TRANSACTION_HISTORY },
+                    onNavigateToActivityInsights = { currentScreen = TieyohScreen.ACTIVITY_INSIGHTS }
                 )
 
                 TieyohScreen.WALLET_OVERVIEW -> {
                     WalletOverviewScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.MY_CARD }
+                    )
+                }
+
+                TieyohScreen.TRANSACTION_HISTORY -> {
+                    TransactionHistoryScreen(
+                        currentUser = currentUser,
+                        onBack = { currentScreen = TieyohScreen.MY_CARD }
+                    )
+                }
+
+                TieyohScreen.ACTIVITY_INSIGHTS -> {
+                    ActivityInsightsScreen(
                         currentUser = currentUser,
                         onBack = { currentScreen = TieyohScreen.MY_CARD }
                     )
@@ -3709,7 +3758,9 @@ private fun MyCardScreen(
     currentUser: AuthResponse,
     onNavigateToPayWithQr: () -> Unit,
     onNavigateToPayWithCard: () -> Unit,
-    onNavigateToWalletOverview: () -> Unit
+    onNavigateToWalletOverview: () -> Unit,
+    onNavigateToTransactionHistory: () -> Unit,
+    onNavigateToActivityInsights: () -> Unit
 ) {
     // Tapping the small avatar next to the name blows it up full-size in
     // a dismissible overlay -- stays a small 44dp circle inline otherwise.
@@ -3784,7 +3835,10 @@ private fun MyCardScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        MyCardActionsSection()
+        MyCardActionsSection(
+            onNavigateToTransactionHistory = onNavigateToTransactionHistory,
+            onNavigateToActivityInsights = onNavigateToActivityInsights
+        )
     }
 
     if (showFullPicture) {
@@ -4095,7 +4149,10 @@ private fun PayOptionTile(
 // dropped from here too -- it duplicated the "Pay with QR" option
 // above.)
 @Composable
-private fun MyCardActionsSection() {
+private fun MyCardActionsSection(
+    onNavigateToTransactionHistory: () -> Unit,
+    onNavigateToActivityInsights: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -4115,14 +4172,14 @@ private fun MyCardActionsSection() {
             title = "Transaction History",
             subtitle = "View and search",
             icon = { color -> HistoryGlyph(color = color, size = 26.dp) },
-            onClick = { /* transaction history -- coming soon */ }
+            onClick = onNavigateToTransactionHistory
         )
         MyCardActionRow(
             modifier = Modifier.fillMaxWidth(),
             title = "Activity & Insights",
             subtitle = "See your spending and impact",
             icon = { color -> InsightsGlyph(color = color, size = 26.dp) },
-            onClick = { /* spending insights -- coming soon */ }
+            onClick = onNavigateToActivityInsights
         )
     }
 }

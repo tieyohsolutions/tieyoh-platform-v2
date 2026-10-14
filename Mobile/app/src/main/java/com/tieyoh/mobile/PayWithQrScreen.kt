@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import com.tieyoh.mobile.ui.theme.TieyohMuted
 import com.tieyoh.mobile.ui.theme.TieyohNavy
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.launch
 
 // Reached by tapping "Pay with QR" on the My Card screen
 // (ChooseHowToPaySection, MainActivity.kt). Shown to a partnered
@@ -87,6 +89,16 @@ import java.io.FileOutputStream
 // wherever it needs to go -- so a remote/online payment can still show the
 // merchant the same code an in-person scan would use. Same Phase 1 caveat
 // applies: it's sharing the stub image, not a live payment session.
+//
+// "Add to Wallet" is real, separately from the Phase 1 caveat above: it
+// calls GoogleWalletApi for a signed save-to-Google-Wallet JWT
+// (GoogleWalletService on the backend) and launches Google Wallet's own
+// on-device save flow via GoogleWalletHelper.kt. The pass it creates
+// mirrors qrPayload exactly -- today that's still the Phase 1 stub above,
+// so the wallet pass is just as much a stub as the in-app QR code is;
+// once generateStubPaymentQrPayload() is swapped for a real backend-minted
+// token, the wallet pass automatically starts encoding the real one too,
+// with no further change needed here.
 @Composable
 fun PayWithQrScreen(
     currentUser: AuthResponse,
@@ -94,6 +106,8 @@ fun PayWithQrScreen(
     onFindMerchants: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val walletAvailable by rememberGoogleWalletAvailable()
     val tieyohId = currentUser.tieyohId ?: ""
 
     // PLACEHOLDER ONLY -- see the Phase 1 note above. A real payment QR
@@ -275,7 +289,24 @@ fun PayWithQrScreen(
             // duplicating the glyph.
             TieyohPrimaryButton(
                 text = "Add to Wallet",
-                onClick = { /* Apple/Google/Samsung Wallet provisioning -- coming soon, see PayWithCardScreen's identical button */ },
+                onClick = {
+                    if (!walletAvailable) {
+                        Toast.makeText(context, "Google Wallet isn't available on this device.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        scope.launch {
+                            try {
+                                val response = RetrofitClient.googleWalletApi.getQrCardSaveJwt(currentUser.id, qrPayload)
+                                if (response.configured && response.saveJwt != null) {
+                                    launchAddToGoogleWallet(context, response.saveJwt, GOOGLE_WALLET_QR_CARD_REQUEST_CODE)
+                                } else {
+                                    Toast.makeText(context, "Google Wallet isn't set up for Tieyoh yet.", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Couldn't add to Google Wallet. Try again.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
                 leadingContent = { WalletStackGlyph(size = 32.dp) },
                 backgroundColor = TieyohNavy
             )

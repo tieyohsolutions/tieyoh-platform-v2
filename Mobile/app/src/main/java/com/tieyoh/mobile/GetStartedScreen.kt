@@ -27,8 +27,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,6 +77,15 @@ fun GetStartedScreen(
     // Back then forward again) instead of resetting blank every time.
     LaunchedEffect(firstName, lastName, phone, email) {
         onFieldsChanged(firstName, lastName, phone, email)
+    }
+
+    // Puts the cursor in First Name as soon as this screen appears, so
+    // typing can start immediately instead of requiring a tap first.
+    val firstNameFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        firstNameFocusRequester.requestFocus()
+        keyboardController?.show()
     }
 
     val firstNameValid = firstName.trim().isNotEmpty()
@@ -161,7 +173,9 @@ fun GetStartedScreen(
                         focusedLabelColor = TieyohBrandBlue,
                         cursorColor = TieyohBrandBlue
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(firstNameFocusRequester)
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
