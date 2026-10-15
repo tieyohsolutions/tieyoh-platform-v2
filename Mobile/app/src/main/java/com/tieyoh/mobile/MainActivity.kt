@@ -4873,5 +4873,16 @@ private fun ProfileScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         TieyohSecondaryButton(text = "Log out", onClick = onLogout)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // App version (REQ-002) -- last item on the screen, read from
+        // BuildConfig, never typed here. Plain Text: not clickable, and
+        // TalkBack reads it as-is ("Version 1.x").
+        Text(
+            text = AppVersion.displayLabel,
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy
+        )
     }
 }
