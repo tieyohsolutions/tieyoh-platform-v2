@@ -3,19 +3,43 @@ package com.tieyoh.mobile
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.tieyoh.mobile.ui.theme.TieyohAccent
+import com.tieyoh.mobile.ui.theme.TieyohBorder
+import com.tieyoh.mobile.ui.theme.TieyohCardBg
+import com.tieyoh.mobile.ui.theme.TieyohFabRing
+import com.tieyoh.mobile.ui.theme.TieyohGiftRed
+import com.tieyoh.mobile.ui.theme.TieyohMuted
+import com.tieyoh.mobile.ui.theme.TieyohNavInactive
+import com.tieyoh.mobile.ui.theme.TieyohNavy
+import com.tieyoh.mobile.ui.theme.TieyohSponsoredBg
+import com.tieyoh.mobile.ui.theme.TieyohSponsoredBody
+import com.tieyoh.mobile.ui.theme.TieyohSponsoredHeading
+import com.tieyoh.mobile.ui.theme.TieyohSponsoredLabel
+import com.tieyoh.mobile.ui.theme.TieyohSponsoredLogoBg
 import com.tieyoh.mobile.ui.theme.TieyohTheme
+import com.tieyoh.mobile.ui.theme.TieyohTrack
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -25,37 +49,61 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TieyohTheme {
-                TieyohApp()
+                var authenticatedUser by remember { mutableStateOf<AuthResponse?>(null) }
+
+                val user = authenticatedUser
+                if (user == null) {
+                    LoginScreen(
+                        onAuthenticated = { response -> authenticatedUser = response }
+                    )
+                } else {
+                    TieyohApp(
+                        currentUser = user,
+                        onLogout = { authenticatedUser = null }
+                    )
+                }
             }
         }
     }
 }
 
+// Matches the four tabs + center Send action from the interactive prototype
+// (Feed / My list / My card / Profile, with the Send FAB in the middle).
 private enum class TieyohScreen {
-    DASHBOARD,
-    MY_GIFTS,
+    FEED,
+    MY_LIST,
+    MY_CARD,
+    PROFILE,
     SEND_GIFT,
-    SEARCH_MERCHANT,
-    PROFILE
+    SEARCH_MERCHANT
 }
 
-private data class FriendActivity(
-    val title: String,
-    val detail: String
+private data class WishTarget(
+    val merchant: String,
+    val current: Int,
+    val goal: Int
+)
+
+private data class MerchantAllocation(
+    val merchant: String,
+    val amount: Double
 )
 
 @Composable
-fun TieyohApp() {
+fun TieyohApp(
+    currentUser: AuthResponse,
+    onLogout: () -> Unit
+) {
 
     var currentScreen by remember {
-        mutableStateOf(TieyohScreen.DASHBOARD)
+        mutableStateOf(TieyohScreen.FEED)
     }
 
     Scaffold(
         topBar = {
             TieyohTopBar(
                 onLogoClick = {
-                    currentScreen = TieyohScreen.DASHBOARD
+                    currentScreen = TieyohScreen.FEED
                 }
             )
         },
@@ -66,29 +114,33 @@ fun TieyohApp() {
                     currentScreen = screen
                 }
             )
-        }
+        },
+        floatingActionButton = {
+            SendFab(
+                onClick = { currentScreen = TieyohScreen.SEND_GIFT }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { innerPadding ->
 
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
+            color = MaterialTheme.colorScheme.background
         ) {
 
             when (currentScreen) {
 
-                TieyohScreen.DASHBOARD -> {
-                    DashboardScreen(
-                        onSendGift = {
-                            currentScreen = TieyohScreen.SEND_GIFT
-                        },
-                        onSearchMerchant = {
-                            currentScreen = TieyohScreen.SEARCH_MERCHANT
-                        }
+                TieyohScreen.FEED -> {
+                    FeedScreen(
+                        onSeeFullFeed = { /* full feed list — coming soon */ }
                     )
                 }
 
-                TieyohScreen.MY_GIFTS -> MyGiftsScreen()
+                TieyohScreen.MY_LIST -> MyListScreen()
+
+                TieyohScreen.MY_CARD -> MyCardScreen()
 
                 TieyohScreen.SEND_GIFT -> {
                     MerchantSearchScreen(
@@ -106,7 +158,7 @@ fun TieyohApp() {
                     )
                 }
 
-                TieyohScreen.PROFILE -> ProfileScreen()
+                TieyohScreen.PROFILE -> ProfileScreen(currentUser = currentUser, onLogout = onLogout)
             }
         }
     }
@@ -118,27 +170,54 @@ private fun TieyohTopBar(
 ) {
 
     Surface(
-        shadowElevation = 2.dp
+        color = TieyohNavy,
+        shadowElevation = 0.dp
     ) {
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(72.dp)
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
 
-            Image(
-                painter = painterResource(
-                    id = R.drawable.tieyoh_logo
-                ),
-                contentDescription = "Tieyoh",
-                modifier = Modifier
-                    .height(38.dp)
-                    .clickable {
-                        onLogoClick()
-                    }
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(color = Color.White)) { append("tie") }
+                    withStyle(SpanStyle(color = Color(0xFF5EEAD4))) { append("yoh") }
+                },
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.clickable { onLogoClick() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SendFab(onClick: () -> Unit) {
+    // Outer light ring + red gift-bag center, matching the reference
+    // screenshot the user shared (red FAB instead of the teal one).
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .border(width = 2.dp, color = TieyohFabRing, shape = CircleShape)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(TieyohGiftRed),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "\uD83C\uDF81",
+                fontSize = 24.sp
             )
         }
     }
@@ -150,178 +229,387 @@ private fun TieyohBottomNavigation(
     onNavigate: (TieyohScreen) -> Unit
 ) {
 
-    NavigationBar {
+    NavigationBar(
+        containerColor = Color.White,
+        contentColor = TieyohNavInactive
+    ) {
 
         NavigationBarItem(
-            selected = currentScreen == TieyohScreen.MY_GIFTS,
-            onClick = { onNavigate(TieyohScreen.MY_GIFTS) },
-            icon = { Text("G") },
-            label = { Text("My Gifts") }
+            selected = currentScreen == TieyohScreen.FEED,
+            onClick = { onNavigate(TieyohScreen.FEED) },
+            icon = { Text("▤") },
+            label = { Text("Feed") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = TieyohAccent,
+                selectedTextColor = TieyohAccent,
+                unselectedIconColor = TieyohNavInactive,
+                unselectedTextColor = TieyohNavInactive,
+                indicatorColor = Color.Transparent
+            )
         )
 
         NavigationBarItem(
-            selected = currentScreen == TieyohScreen.SEND_GIFT,
-            onClick = { onNavigate(TieyohScreen.SEND_GIFT) },
-            icon = { Text("+") },
-            label = { Text("Send Gift") }
+            selected = currentScreen == TieyohScreen.MY_LIST,
+            onClick = { onNavigate(TieyohScreen.MY_LIST) },
+            icon = { Text("☰") },
+            label = { Text("My list") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = TieyohAccent,
+                selectedTextColor = TieyohAccent,
+                unselectedIconColor = TieyohNavInactive,
+                unselectedTextColor = TieyohNavInactive,
+                indicatorColor = Color.Transparent
+            )
         )
 
         NavigationBarItem(
-            selected = currentScreen == TieyohScreen.SEARCH_MERCHANT,
-            onClick = { onNavigate(TieyohScreen.SEARCH_MERCHANT) },
-            icon = { Text("⌕") },
-            label = { Text("Search") }
+            selected = currentScreen == TieyohScreen.MY_CARD,
+            onClick = { onNavigate(TieyohScreen.MY_CARD) },
+            icon = { Text("▭") },
+            label = { Text("My card") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = TieyohAccent,
+                selectedTextColor = TieyohAccent,
+                unselectedIconColor = TieyohNavInactive,
+                unselectedTextColor = TieyohNavInactive,
+                indicatorColor = Color.Transparent
+            )
         )
 
         NavigationBarItem(
             selected = currentScreen == TieyohScreen.PROFILE,
             onClick = { onNavigate(TieyohScreen.PROFILE) },
-            icon = { Text("P") },
-            label = { Text("Profile") }
+            icon = { Text("◔") },
+            label = { Text("Profile") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = TieyohAccent,
+                selectedTextColor = TieyohAccent,
+                unselectedIconColor = TieyohNavInactive,
+                unselectedTextColor = TieyohNavInactive,
+                indicatorColor = Color.Transparent
+            )
         )
     }
 }
 
 @Composable
-private fun DashboardScreen(
-    onSendGift: () -> Unit,
-    onSearchMerchant: () -> Unit
+private fun FeedScreen(
+    onSeeFullFeed: () -> Unit
 ) {
 
-    val activities = listOf(
-        FriendActivity(
-            title = "Maya sent Jordan a birthday gift",
-            detail = "Gift designated for Bluebird Cafe"
-        ),
-        FriendActivity(
-            title = "Chris and Alex exchanged gifts",
-            detail = "Celebrating their anniversary"
-        ),
-        FriendActivity(
-            title = "Daniel thanked Sam for a gift",
-            detail = "Used at a local restaurant"
-        ),
-        FriendActivity(
-            title = "Hannah sent a congratulations gift",
-            detail = "A new Tieyoh exchange between friends"
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(top = 22.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+
+        item {
+            Text(
+                text = "Hi Hany, here's what your circle's up to",
+                fontSize = 16.sp,
+                color = TieyohMuted
+            )
+        }
+
+        item { WishTargetCard() }
+
+        item { SponsoredCard() }
+
+        item {
+            TransactionCard(
+                initials = "ML",
+                headlinePrefix = "Marcus Lee sent a ",
+                giftLabel = "\$25 gift",
+                headlineSuffix = " to Priya Patel",
+                subtitle = "Whole Foods · 5h ago"
+            )
+        }
+
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.5.dp, TieyohAccent, RoundedCornerShape(14.dp))
+                    .clickable { onSeeFullFeed() }
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("See full feed", color = TieyohAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WishTargetCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(20.dp)
+    ) {
+        Text("Sarah Chen set a wish target", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+        Spacer(Modifier.height(4.dp))
+        Text("Blue Bottle Coffee · 2h ago", fontSize = 14.sp, color = TieyohMuted)
+        Spacer(Modifier.height(14.dp))
+
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("\$55", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+            Text(" / \$100", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(9.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(TieyohTrack)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(TieyohAccent)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SponsoredCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohSponsoredBg)
+            .padding(20.dp)
+    ) {
+        Text(
+            "SPONSORED",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = TieyohSponsoredLabel,
+            letterSpacing = 1.sp
         )
+        Spacer(Modifier.height(12.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(TieyohSponsoredLogoBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("BL", fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text("Blue Bottle Coffee", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TieyohSponsoredHeading)
+                Text("20% off this week with Tieyoh", fontSize = 13.sp, color = TieyohSponsoredBody)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(TieyohNavy)
+                .padding(14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("View offer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
+    }
+}
+
+@Composable
+private fun TransactionCard(
+    initials: String,
+    headlinePrefix: String,
+    giftLabel: String,
+    headlineSuffix: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TieyohCardBg)
+            .padding(20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(TieyohTrack),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(initials, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TieyohNavy)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(
+                buildAnnotatedString {
+                    append(headlinePrefix)
+                    withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, color = TieyohAccent)) {
+                        append(giftLabel)
+                    }
+                    append(headlineSuffix)
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = TieyohNavy
+            )
+            Text(subtitle, fontSize = 13.sp, color = TieyohMuted)
+        }
+    }
+}
+
+@Composable
+private fun MyListScreen() {
+
+    val wishTargets = listOf(
+        WishTarget("Blue Bottle Coffee", 55, 100),
+        WishTarget("Whole Foods", 20, 50),
+        WishTarget("AMC Theatres", 0, 40)
     )
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(
-            top = 20.dp,
-            bottom = 24.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(top = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 
         item {
+            Text("My list", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = "What's happening",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Gifts and exchanges from people you're connected with on Tieyoh.",
-                style = MaterialTheme.typography.bodyMedium
+                "Up to 10 merchants you'd love a gift from. Set a wish target and your circle can chip in toward it — no payment method needed to set one.",
+                color = TieyohMuted
             )
         }
 
-        items(activities) { activity ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
+        items(wishTargets) { target ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(TieyohCardBg)
+                    .padding(18.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+                Text(target.merchant, fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 16.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("\$${target.current}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TieyohNavy)
+                    Text(" / \$${target.goal}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TieyohMuted)
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(TieyohTrack)
                 ) {
-                    Text(
-                        text = activity.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = activity.detail,
-                        style = MaterialTheme.typography.bodyMedium
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(
+                                if (target.goal > 0) (target.current.toFloat() / target.goal).coerceIn(0f, 1f) else 0f
+                            )
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(TieyohAccent)
                     )
                 }
             }
         }
 
         item {
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = onSendGift,
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(1.5.dp, TieyohAccent, RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Send a Gift")
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = onSearchMerchant,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Search for a Merchant")
+                Text("+ Add a merchant to your list", color = TieyohAccent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
         }
     }
 }
 
 @Composable
-private fun MyGiftsScreen() {
+private fun MyCardScreen() {
 
-    val gifts = listOf(
-        "Birthday Gift • Available",
-        "Dinner Gift • Available",
-        "Congratulations Gift • Used"
+    val allocations = listOf(
+        MerchantAllocation("Blue Bottle Coffee", 40.0),
+        MerchantAllocation("Whole Foods", 15.0)
     )
+    val total = allocations.sumOf { it.amount }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(
-            top = 20.dp,
-            bottom = 24.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(20.dp)
     ) {
+        Text("My card", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = TieyohNavy)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "One card for everything you've received. Funds stay grouped by merchant below until you spend them there — no separate gift card to juggle.",
+            color = TieyohMuted
+        )
+        Spacer(Modifier.height(16.dp))
 
-        item {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(TieyohNavy)
+                .padding(22.dp)
+        ) {
             Text(
-                text = "My Gifts",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(color = Color.White)) { append("tie") }
+                    withStyle(SpanStyle(color = Color(0xFF5EEAD4))) { append("yoh") }
+                },
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold
             )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Mock gift data for the first mobile prototype.",
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Spacer(Modifier.height(28.dp))
+            Text("Total balance", color = Color(0xFFB7D9D2), fontSize = 14.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("\$${"%.2f".format(total)}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         }
 
-        items(gifts) { gift ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = gift,
-                    modifier = Modifier.padding(18.dp),
-                    style = MaterialTheme.typography.bodyLarge
-                )
+        Spacer(Modifier.height(18.dp))
+        Text("Held by merchant", fontWeight = FontWeight.Bold, color = TieyohNavy, fontSize = 15.sp)
+        Spacer(Modifier.height(10.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(allocations) { allocation ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(TieyohCardBg)
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(allocation.merchant, color = TieyohNavy)
+                    Text("\$${"%.2f".format(allocation.amount)}", color = TieyohNavy, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -364,14 +652,16 @@ private fun MerchantSearchScreen(
         Text(
             text = title,
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = subtitle,
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodyMedium,
+            color = TieyohMuted
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -439,6 +729,7 @@ private fun MerchantSearchScreen(
                     }
                 }
             },
+            colors = ButtonDefaults.buttonColors(containerColor = TieyohAccent),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(actionLabel)
@@ -447,27 +738,32 @@ private fun MerchantSearchScreen(
         Spacer(modifier = Modifier.height(14.dp))
 
         selectedMerchant?.let { merchant ->
-            Card(
-                modifier = Modifier.fillMaxWidth()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(TieyohCardBg)
+                    .padding(14.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp)
-                ) {
+                Column {
                     Text(
                         text = "Selected merchant",
-                        style = MaterialTheme.typography.labelMedium
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TieyohMuted
                     )
 
                     Text(
                         text = merchant.brandName,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = TieyohNavy
                     )
 
                     merchant.category?.let { category ->
                         Text(
                             text = category,
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TieyohMuted
                         )
                     }
                 }
@@ -484,7 +780,7 @@ private fun MerchantSearchScreen(
                         .padding(20.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = TieyohAccent)
                 }
             }
 
@@ -496,13 +792,14 @@ private fun MerchantSearchScreen(
             }
 
             hasSearched && merchants.isEmpty() -> {
-                Text("No eligible merchants found.")
+                Text("No eligible merchants found.", color = TieyohMuted)
             }
 
             merchants.isNotEmpty() -> {
                 Text(
                     text = "${merchants.size} merchant(s) found",
-                    style = MaterialTheme.typography.labelLarge
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TieyohNavy
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -537,12 +834,13 @@ private fun MerchantResultCard(
     onSelect: () -> Unit
 ) {
 
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                onSelect()
-            }
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) TieyohCardBg else Color.White)
+            .border(1.dp, TieyohBorder, RoundedCornerShape(16.dp))
+            .clickable { onSelect() }
     ) {
 
         Row(
@@ -559,14 +857,16 @@ private fun MerchantResultCard(
                 Text(
                     text = merchant.brandName,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = TieyohNavy
                 )
 
                 merchant.category?.let { category ->
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = category,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TieyohMuted
                     )
                 }
 
@@ -574,21 +874,26 @@ private fun MerchantResultCard(
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = tmid,
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TieyohMuted
                     )
                 }
             }
 
             Text(
                 text = if (selected) "Selected" else "›",
-                style = MaterialTheme.typography.labelLarge
+                style = MaterialTheme.typography.labelLarge,
+                color = TieyohAccent
             )
         }
     }
 }
 
 @Composable
-private fun ProfileScreen() {
+private fun ProfileScreen(
+    currentUser: AuthResponse,
+    onLogout: () -> Unit
+) {
 
     Column(
         modifier = Modifier
@@ -599,28 +904,50 @@ private fun ProfileScreen() {
         Text(
             text = "Profile",
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = TieyohNavy
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(TieyohCardBg)
+                .padding(18.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp)
-            ) {
+            Column {
                 Text(
-                    text = "Tieyoh Member",
-                    style = MaterialTheme.typography.titleMedium
+                    text = currentUser.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TieyohNavy
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = currentUser.email,
+                    color = TieyohMuted
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Profile, friends, payment settings, and preferences will be added here."
+                    text = "Friends, payment settings, and preferences will be added here.",
+                    color = TieyohMuted
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onLogout,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Log out")
         }
     }
 }
