@@ -15,3 +15,6 @@ Mobile/.idea/deviceManager.xml
 # Merchant source data (local only)
 Backend/merchant-imports/*
 
+
+.DS_Store
+.claude/worktrees/
