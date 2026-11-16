@@ -131,6 +131,19 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- DEF-001: tests that need a database run against a throwaway
+		     PostgreSQL container, never the dev database. Versions are
+		     managed by the Spring Boot parent. Requires Docker. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -138,6 +151,116 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<!-- REQ-001: writes META-INF/build-info.properties (name,
+					     version, build time) for /actuator/info. The time is
+					     fixed when the artifact is built, not at startup.
+					     group and artifact are excluded: only the approved
+					     fields are generated. -->
+					<execution>
+						<id>build-info</id>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+						<configuration>
+							<excludeInfoProperties>
+								<excludeInfoProperty>group</excludeInfoProperty>
+								<excludeInfoProperty>artifact</excludeInfoProperty>
+							</excludeInfoProperties>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- REQ-001: writes git.properties for /actuator/info with only the
+			     approved git fields: short commit id, commit time (UTC) and the
+			     dirty flag. Author/committer names and emails, remote URL, commit
+			     message, branch, build host/user and tags are never read, so they
+			     can't reach the artifact or the build log.
+
+			     Uses the git CLI from this project directory instead of
+			     git-commit-id-maven-plugin: that plugin (9.2.0 and 10.0.1, JGit and
+			     native modes) resolves a linked git worktree to the main checkout
+			     and reports the wrong commit / dirty flag (DEF-003). The git CLI
+			     resolves worktrees, submodules and normal clones itself.
+
+			     dirty=true when there are tracked changes (staged or not) or
+			     untracked files that are not gitignored, anywhere in the
+			     repository (DEF-002). "status" runs with no-optional-locks so the
+			     build never writes to .git.
+
+			     Building without a .git directory or without git installed must
+			     not fail (AC-9/AC-10): any git error just means no git.properties
+			     is written and the git section is omitted from /actuator/info. A
+			     git.properties from an earlier build is deleted first so stale
+			     values can't survive. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>git-properties</id>
+						<phase>generate-resources</phase>
+						<goals>
+							<goal>run</goal>
+						</goals>
+						<configuration>
+							<target xmlns:if="ant:if">
+								<property name="tieyoh.git.file" value="${project.build.outputDirectory}/git.properties"/>
+								<delete file="${tieyoh.git.file}" quiet="true"/>
+								<property environment="tieyoh.env"/>
+								<condition property="tieyoh.git.cli">
+									<or>
+										<available file="git" filepath="${tieyoh.env.PATH}"/>
+										<available file="git.exe" filepath="${tieyoh.env.PATH}"/>
+										<available file="git.exe" filepath="${tieyoh.env.Path}"/>
+									</or>
+								</condition>
+								<sequential if:set="tieyoh.git.cli">
+									<exec executable="git" dir="${project.basedir}" failonerror="false"
+											failifexecutionfails="false" outputproperty="tieyoh.git.id"
+											errorproperty="tieyoh.git.id.err" resultproperty="tieyoh.git.id.rc">
+										<arg value="rev-parse"/>
+										<arg value="--short=7"/>
+										<arg value="--verify"/>
+										<arg value="HEAD"/>
+									</exec>
+									<exec executable="git" dir="${project.basedir}" failonerror="false"
+											failifexecutionfails="false" outputproperty="tieyoh.git.time"
+											errorproperty="tieyoh.git.time.err" resultproperty="tieyoh.git.time.rc">
+										<env key="TZ" value="UTC"/>
+										<arg value="log"/>
+										<arg value="-1"/>
+										<arg value="--no-show-signature"/>
+										<arg value="--date=format-local:%Y-%m-%dT%H:%M:%SZ"/>
+										<arg value="--format=%cd"/>
+										<arg value="HEAD"/>
+									</exec>
+									<exec executable="git" dir="${project.basedir}" failonerror="false"
+											failifexecutionfails="false" outputproperty="tieyoh.git.status"
+											errorproperty="tieyoh.git.status.err" resultproperty="tieyoh.git.status.rc">
+										<arg value="--no-optional-locks"/>
+										<arg value="status"/>
+										<arg value="--porcelain"/>
+										<arg value="--untracked-files=normal"/>
+									</exec>
+								</sequential>
+								<condition property="tieyoh.git.available">
+									<and>
+										<equals arg1="${tieyoh.git.id.rc}" arg2="0"/>
+										<equals arg1="${tieyoh.git.time.rc}" arg2="0"/>
+										<equals arg1="${tieyoh.git.status.rc}" arg2="0"/>
+										<matches string="${tieyoh.git.id}" pattern="^[0-9a-f]{7,40}$"/>
+									</and>
+								</condition>
+								<condition property="tieyoh.git.dirty" value="true" else="false">
+									<length string="${tieyoh.git.status}" trim="true" when="greater" length="0"/>
+								</condition>
+								<echo if:set="tieyoh.git.available" file="${tieyoh.git.file}" encoding="ISO-8859-1"
+										message="git.commit.id.abbrev=${tieyoh.git.id}${line.separator}git.commit.time=${tieyoh.git.time}${line.separator}git.dirty=${tieyoh.git.dirty}${line.separator}"/>
+							</target>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
