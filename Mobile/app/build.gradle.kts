@@ -28,8 +28,15 @@ android {
         applicationId = "com.tieyoh.mobile"
         minSdk = 24
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        // App version -- the single source of truth (REQ-002). Shown to
+        // users as "Version <versionName>" on the Profile screen via
+        // BuildConfig.VERSION_NAME, and by Android under App info.
+        // Format MAJOR.MINOR. Bump ONLY when Hany explicitly says
+        // "minor" (right number +1) or "major" (left number +1, right
+        // resets to 0). versionCode must go up by 1 on every bump and
+        // never go down.
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
@@ -48,6 +55,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Generates BuildConfig.VERSION_NAME, read by AppVersion.kt.
+        buildConfig = true
     }
 }
 
